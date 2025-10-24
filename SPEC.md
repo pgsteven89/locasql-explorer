@@ -210,6 +210,27 @@ This project emphasizes **spec-driven development**, ensuring all features are c
   * Support mixed file types in a single selection (CSV + XLSX + Parquet)
   * Implement smart duplicate handling and table name generation
 
+### **Phase 6 – Enhanced Search and Filtering**
+
+* [ ] **Column-Specific Search in Results View** - Add advanced search capabilities to query results with column targeting.
+  * Add column dropdown selector next to search input in paginated results view
+  * Populate dropdown with all column names from current query results
+  * Include "All Columns" option for global search across all fields
+  * Implement column-specific filtering that only searches within selected column
+  * Support case-sensitive/insensitive search toggle for refined filtering
+  * Maintain search state when navigating between pages in paginated results
+  * Real-time search filtering with debounced input to prevent performance issues
+  * Clear visual indicators showing which column is being searched and active filters
+
+* [ ] **Advanced Filter Operators** - Extend search functionality with SQL-like operators.
+  * Support basic comparison operators (equals, contains, starts with, ends with)
+  * Add numeric range filtering for numeric columns (greater than, less than, between)
+  * Date range filtering for date/datetime columns with calendar picker
+  * Pattern matching with wildcards and basic regex support
+  * Multiple filter conditions with AND/OR logic
+  * Filter history and saved filter presets for common queries
+  * Export filtered results while maintaining original query context
+
 ---
 
 ## 8. Future Enhancements

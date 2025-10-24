@@ -140,11 +140,19 @@ class PaginatedTableWidget(QWidget):
         search_layout = QHBoxLayout(search_group)
         
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search in current page...")
+        self.search_input.setPlaceholderText("Search in selected column or all columns...")
         self.search_input.textChanged.connect(self.filter_current_page)
         search_layout.addWidget(self.search_input)
-        
+
+        # Column selector dropdown
+        self.column_dropdown = QComboBox()
+        self.column_dropdown.setMinimumWidth(120)
+        self.column_dropdown.addItem("All Columns")
+        self.column_dropdown.currentTextChanged.connect(self.filter_current_page)
+        search_layout.addWidget(self.column_dropdown)
+
         self.case_sensitive_cb = QCheckBox("Case sensitive")
+        self.case_sensitive_cb.stateChanged.connect(self.filter_current_page)
         search_layout.addWidget(self.case_sensitive_cb)
         
         layout.addWidget(search_group)
@@ -299,6 +307,9 @@ class PaginatedTableWidget(QWidget):
         # Update table
         self.populate_table(data)
         
+        # Update column dropdown for search
+        self.update_column_dropdown()
+        
         # Update navigation
         self.update_navigation_state()
         
@@ -375,6 +386,29 @@ class PaginatedTableWidget(QWidget):
             if width > 300:
                 header.resizeSection(col, 300)
     
+    def update_column_dropdown(self):
+        """Update the column dropdown with current data columns."""
+        if self.current_data is None or self.current_data.empty:
+            return
+        
+        # Store current selection
+        current_selection = self.column_dropdown.currentText()
+        
+        # Clear and repopulate dropdown
+        self.column_dropdown.clear()
+        self.column_dropdown.addItem("All Columns")
+        
+        # Add all column names
+        for column in self.current_data.columns:
+            self.column_dropdown.addItem(str(column))
+        
+        # Restore selection if it still exists
+        index = self.column_dropdown.findText(current_selection)
+        if index >= 0:
+            self.column_dropdown.setCurrentIndex(index)
+        else:
+            self.column_dropdown.setCurrentIndex(0)  # Default to "All Columns"
+    
     def filter_current_page(self):
         """Filter the current page based on search text."""
         if self.current_data is None or self.current_data.empty:
@@ -390,22 +424,42 @@ class PaginatedTableWidget(QWidget):
         
         # Apply filter
         case_sensitive = self.case_sensitive_cb.isChecked()
+        selected_column = self.column_dropdown.currentText()
+        
         if not case_sensitive:
             search_text = search_text.lower()
         
         for row in range(self.table_widget.rowCount()):
             row_matches = False
             
-            for col in range(self.table_widget.columnCount()):
-                item = self.table_widget.item(row, col)
-                if item:
-                    cell_text = item.text()
-                    if not case_sensitive:
-                        cell_text = cell_text.lower()
-                    
-                    if search_text in cell_text:
-                        row_matches = True
-                        break
+            if selected_column == "All Columns":
+                # Search all columns
+                for col in range(self.table_widget.columnCount()):
+                    item = self.table_widget.item(row, col)
+                    if item:
+                        cell_text = item.text()
+                        if not case_sensitive:
+                            cell_text = cell_text.lower()
+                        
+                        if search_text in cell_text:
+                            row_matches = True
+                            break
+            else:
+                # Search only selected column
+                try:
+                    col_index = list(self.current_data.columns).index(selected_column)
+                    if col_index < self.table_widget.columnCount():
+                        item = self.table_widget.item(row, col_index)
+                        if item:
+                            cell_text = item.text()
+                            if not case_sensitive:
+                                cell_text = cell_text.lower()
+                            
+                            if search_text in cell_text:
+                                row_matches = True
+                except (ValueError, IndexError):
+                    # Column not found, skip this row
+                    pass
             
             self.table_widget.setRowHidden(row, not row_matches)
     
