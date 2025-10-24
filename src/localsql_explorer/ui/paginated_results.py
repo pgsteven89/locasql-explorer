@@ -377,7 +377,7 @@ class PaginatedTableWidget(QWidget):
     
     def filter_current_page(self):
         """Filter the current page based on search text."""
-        if not self.current_data or self.current_data.empty:
+        if self.current_data is None or self.current_data.empty:
             return
         
         search_text = self.search_input.text().strip()
@@ -492,7 +492,7 @@ class PaginatedTableWidget(QWidget):
     
     def show_table_context_menu(self, position):
         """Show context menu for table."""
-        if not self.current_data or self.current_data.empty:
+        if self.current_data is None or self.current_data.empty:
             return
         
         menu = QMenu(self)
