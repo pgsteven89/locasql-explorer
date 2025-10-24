@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import Optional, List
 
+import pandas as pd
+
 from PyQt6.QtCore import QSettings, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon, QKeySequence
 from PyQt6.QtWidgets import (
@@ -316,6 +318,10 @@ class MainWindow(QMainWindow):
         
         self.paginated_results = PaginatedTableWidget()
         self.paginated_results.export_requested.connect(self.export_results)
+        self.paginated_results.export_all_requested.connect(self.export_all_results)
+        self.paginated_results.export_filtered_requested.connect(self.export_results)
+        self.paginated_results.status_updated.connect(self.update_status)
+        self.paginated_results.metrics_requested.connect(self.show_paginated_metrics)
         
         # Create a stacked widget to manage results views
         self.results_stack = QStackedWidget()
@@ -475,6 +481,44 @@ class MainWindow(QMainWindow):
         else:
             self.connection_label.setText("🔴 Disconnected")
             self.connection_label.setStyleSheet("color: red; font-weight: bold;")
+    
+    def update_status(self, message: str):
+        """Update the status bar with a message."""
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage(message)
+    
+    def show_paginated_metrics(self, sql: str, result_data: pd.DataFrame, metrics_type: str):
+        """Show metrics for paginated results (original or filtered)."""
+        try:
+            # Create a custom title based on metrics type
+            title_prefix = "Filtered Dataset" if metrics_type == "filtered" else "Original Query"
+            
+            # Import here to avoid circular imports
+            from .query_dialogs import QueryMetricsDialog
+            
+            # Create and show metrics dialog with custom title
+            metrics_dialog = QueryMetricsDialog(self, sql, result_data, 0.0)  # execution_time not relevant for analysis
+            metrics_dialog.setWindowTitle(f"{title_prefix} - Query Execution Metrics")
+            
+            # Update the dialog title in the UI if possible
+            if hasattr(metrics_dialog, 'summary_frame'):
+                # Add a label to indicate the type of metrics
+                metrics_type_label = QLabel(f"<b>Metrics Type:</b> {title_prefix}")
+                metrics_type_label.setStyleSheet("color: #0066cc; font-size: 12px; margin: 5px;")
+                # Try to insert at the top of the dialog
+                layout = metrics_dialog.layout()
+                if layout:
+                    layout.insertWidget(0, metrics_type_label)
+            
+            metrics_dialog.exec()
+            
+        except Exception as e:
+            logger.error(f"Error showing paginated metrics: {e}")
+            QMessageBox.warning(
+                self,
+                "Metrics Error", 
+                f"Unable to display metrics: {str(e)}"
+            )
     
     def connect_editor_actions(self):
         """Connect editor actions to SQL editor."""
@@ -821,6 +865,73 @@ class MainWindow(QMainWindow):
                 error_msg = f"Export failed: {str(e)}"
                 self.status_bar.showMessage(error_msg)
                 QMessageBox.critical(self, "Export Error", error_msg)
+    
+    def export_all_results(self):
+        """Export all query results (complete dataset, not just current page)."""
+        if not self.last_query_sql:
+            QMessageBox.information(self, "Export", "No query results available to export")
+            return
+            
+        # Get file path from user
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export All Results",
+            f"all_results_{int(pd.Timestamp.now().timestamp())}.csv",
+            "CSV Files (*.csv);;Excel Files (*.xlsx);;Parquet Files (*.parquet)"
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            self.status_bar.showMessage("Exporting all results...")
+            
+            # Execute the original query to get complete results
+            complete_result = self.db_manager.execute_query(self.last_query_sql)
+            
+            if complete_result.success and complete_result.data is not None:
+                # Use the exporter to save the complete dataset
+                from localsql_explorer.exporter import ResultExporter
+                exporter = ResultExporter()
+                
+                export_result = exporter.export_dataframe(
+                    complete_result.data,
+                    file_path,
+                    metadata={
+                        'query': self.last_query_sql,
+                        'export_type': 'complete_results',
+                        'total_rows': len(complete_result.data),
+                        'export_timestamp': pd.Timestamp.now().isoformat()
+                    }
+                )
+                
+                if export_result.success:
+                    file_size_mb = export_result.file_size / (1024*1024) if export_result.file_size else 0
+                    self.status_bar.showMessage(
+                        f"Exported all {export_result.row_count:,} rows to {Path(file_path).name} "
+                        f"({file_size_mb:.1f} MB)"
+                    )
+                    
+                    QMessageBox.information(
+                        self,
+                        "Export Complete",
+                        f"Successfully exported complete dataset:\n"
+                        f"• {export_result.row_count:,} total rows\n"
+                        f"• File: {Path(file_path).name}\n"
+                        f"• Size: {file_size_mb:.1f} MB"
+                    )
+                else:
+                    self.status_bar.showMessage(f"Export failed: {export_result.error}")
+                    QMessageBox.critical(self, "Export Error", export_result.error or "Unknown error")
+            else:
+                error_msg = complete_result.error or "Failed to retrieve complete results"
+                self.status_bar.showMessage(f"Export failed: {error_msg}")
+                QMessageBox.critical(self, "Export Error", error_msg)
+                
+        except Exception as e:
+            error_msg = f"Export failed: {str(e)}"
+            self.status_bar.showMessage(error_msg)
+            QMessageBox.critical(self, "Export Error", error_msg)
     
     def run_query(self):
         """Execute the SQL query in the editor with enhanced error handling and metrics."""

@@ -212,7 +212,7 @@ This project emphasizes **spec-driven development**, ensuring all features are c
 
 ### **Phase 6 – Enhanced Search and Filtering**
 
-* [ ] **Column-Specific Search in Results View** - Add advanced search capabilities to query results with column targeting.
+* [x] **Column-Specific Search in Results View** - Add advanced search capabilities to query results with column targeting.
   * Add column dropdown selector next to search input in paginated results view
   * Populate dropdown with all column names from current query results
   * Include "All Columns" option for global search across all fields
@@ -221,6 +221,15 @@ This project emphasizes **spec-driven development**, ensuring all features are c
   * Maintain search state when navigating between pages in paginated results
   * Real-time search filtering with debounced input to prevent performance issues
   * Clear visual indicators showing which column is being searched and active filters
+
+* [ ] **Enhanced Export and Pagination Controls** - Improve data export options and user control over pagination.
+  * Add "Export All Results" button to export complete query result set (all pages)
+  * Add "Export Filtered Results" button to export only rows matching current search filters
+  * Implement dynamic page size selector with common options (100, 500, 1000, 2500, 5000, 10000)
+  * Maintain user's preferred page size across sessions and queries
+  * Show export progress for large result sets with cancellation option
+  * Support all export formats (CSV, Excel, Parquet) for both export modes
+  * Clear labeling to distinguish between current page, filtered results, and complete dataset exports
 
 * [ ] **Advanced Filter Operators** - Extend search functionality with SQL-like operators.
   * Support basic comparison operators (equals, contains, starts with, ends with)

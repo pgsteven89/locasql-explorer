@@ -22,7 +22,11 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QHeaderView,
     QAbstractItemView,
-    QMenu
+    QMenu,
+    QLineEdit,
+    QComboBox,
+    QCheckBox,
+    QGroupBox
 )
 from PyQt6.QtGui import QAction
 
@@ -121,6 +125,8 @@ class ResultsTableView(QWidget):
         super().__init__()
         
         self.model = PandasTableModel()
+        self.original_data = None  # Store original data for filtering
+        self.filtered_data = None  # Store filtered data
         
         self.init_ui()
     
@@ -143,6 +149,10 @@ class ResultsTableView(QWidget):
         header_layout.addWidget(self.export_button)
         
         layout.addLayout(header_layout)
+        
+        # Search controls
+        self.search_widget = self.create_search_widget()
+        layout.addWidget(self.search_widget)
         
         # Table view
         self.table_view = QTableView()
@@ -181,6 +191,41 @@ class ResultsTableView(QWidget):
         
         self.setLayout(layout)
     
+    def create_search_widget(self):
+        """Create the search widget with column selection and search functionality."""
+        search_group = QGroupBox("Search & Filter")
+        search_layout = QHBoxLayout()
+        
+        # Column selection dropdown
+        search_layout.addWidget(QLabel("Column:"))
+        self.column_combo = QComboBox()
+        self.column_combo.addItem("All Columns", "")  # Empty string means search all columns
+        self.column_combo.setMinimumWidth(150)
+        self.column_combo.currentTextChanged.connect(self.filter_results)
+        search_layout.addWidget(self.column_combo)
+        
+        # Search input
+        search_layout.addWidget(QLabel("Search:"))
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Enter search term...")
+        self.search_input.textChanged.connect(self.filter_results)
+        search_layout.addWidget(self.search_input)
+        
+        # Case sensitivity checkbox
+        self.case_sensitive_checkbox = QCheckBox("Case sensitive")
+        self.case_sensitive_checkbox.stateChanged.connect(self.filter_results)
+        search_layout.addWidget(self.case_sensitive_checkbox)
+        
+        # Filter status label
+        self.filter_status_label = QLabel("")
+        self.filter_status_label.setStyleSheet("color: #666; font-style: italic;")
+        search_layout.addWidget(self.filter_status_label)
+        
+        search_layout.addStretch()
+        search_group.setLayout(search_layout)
+        
+        return search_group
+    
     def set_dataframe(self, dataframe: pd.DataFrame):
         """
         Set the dataframe to display.
@@ -188,6 +233,13 @@ class ResultsTableView(QWidget):
         Args:
             dataframe: Pandas DataFrame to display
         """
+        # Store original data for filtering
+        self.original_data = dataframe.copy() if not dataframe.empty else pd.DataFrame()
+        self.filtered_data = self.original_data.copy()
+        
+        # Update column dropdown
+        self.update_column_dropdown()
+        
         # Update model
         self.model.set_dataframe(dataframe)
         
@@ -206,6 +258,10 @@ class ResultsTableView(QWidget):
             width = header.sectionSize(i)
             if width > 200:
                 header.resizeSection(i, 200)
+        
+        # Reset search
+        self.search_input.clear()
+        self.filter_status_label.setText("")
         
         logger.info(f"Displayed DataFrame with {len(dataframe)} rows, {len(dataframe.columns)} columns")
     
@@ -247,10 +303,10 @@ class ResultsTableView(QWidget):
                 self.memory_label.setText("")
     
     def get_dataframe(self) -> Optional[pd.DataFrame]:
-        """Get the current dataframe."""
-        if self.model.rowCount() == 0:
+        """Get the current dataframe (filtered data)."""
+        if self.filtered_data is None or self.filtered_data.empty:
             return None
-        return self.model.get_dataframe()
+        return self.filtered_data.copy()
     
     def has_data(self) -> bool:
         """Check if there is data to display."""
@@ -258,6 +314,8 @@ class ResultsTableView(QWidget):
     
     def clear(self):
         """Clear the results view."""
+        self.original_data = None
+        self.filtered_data = None
         self.set_dataframe(pd.DataFrame())
     
     def export_results(self):
@@ -352,3 +410,79 @@ class ResultsTableView(QWidget):
         """Decrease font size."""
         current_size = self.table_view.font().pointSize()
         self.set_font_size(max(current_size - 1, 8))
+    
+    def update_column_dropdown(self):
+        """Update the column dropdown with current DataFrame columns."""
+        self.column_combo.clear()
+        self.column_combo.addItem("All Columns", "")  # Empty string means search all columns
+        
+        if self.original_data is not None and not self.original_data.empty:
+            for col in self.original_data.columns:
+                self.column_combo.addItem(str(col), str(col))
+    
+    def filter_results(self):
+        """Filter results based on search criteria."""
+        if self.original_data is None or self.original_data.empty:
+            return
+        
+        search_text = self.search_input.text().strip()
+        selected_column = self.column_combo.currentData()
+        case_sensitive = self.case_sensitive_checkbox.isChecked()
+        
+        if not search_text:
+            # No search text, show all data
+            self.filtered_data = self.original_data.copy()
+        else:
+            # Apply filter
+            if selected_column:  # Search specific column
+                if selected_column in self.original_data.columns:
+                    if case_sensitive:
+                        mask = self.original_data[selected_column].astype(str).str.contains(
+                            search_text, case=True, na=False, regex=False
+                        )
+                    else:
+                        mask = self.original_data[selected_column].astype(str).str.contains(
+                            search_text, case=False, na=False, regex=False
+                        )
+                    self.filtered_data = self.original_data[mask].copy()
+                else:
+                    self.filtered_data = pd.DataFrame()
+            else:  # Search all columns
+                mask = pd.Series([False] * len(self.original_data))
+                for col in self.original_data.columns:
+                    try:
+                        if case_sensitive:
+                            col_mask = self.original_data[col].astype(str).str.contains(
+                                search_text, case=True, na=False, regex=False
+                            )
+                        else:
+                            col_mask = self.original_data[col].astype(str).str.contains(
+                                search_text, case=False, na=False, regex=False
+                            )
+                        mask = mask | col_mask
+                    except:
+                        continue
+                self.filtered_data = self.original_data[mask].copy()
+        
+        # Update display
+        self.model.set_dataframe(self.filtered_data)
+        
+        # Update info labels
+        self.update_info_labels(self.filtered_data)
+        
+        # Update filter status
+        total_rows = len(self.original_data)
+        filtered_rows = len(self.filtered_data)
+        
+        if search_text:
+            if filtered_rows == 0:
+                self.filter_status_label.setText("No matches found")
+            elif filtered_rows != total_rows:
+                self.filter_status_label.setText(f"{filtered_rows} of {total_rows} rows")
+            else:
+                self.filter_status_label.setText(f"All {total_rows} rows match")
+        else:
+            self.filter_status_label.setText("")
+        
+        # Enable/disable export based on filtered data
+        self.export_button.setEnabled(not self.filtered_data.empty)

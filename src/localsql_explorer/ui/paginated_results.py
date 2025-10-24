@@ -73,7 +73,11 @@ class PaginatedTableWidget(QWidget):
     """
     
     # Signals
-    export_requested = pyqtSignal(object)  # DataFrame
+    export_requested = pyqtSignal(object)  # DataFrame (current page)
+    export_all_requested = pyqtSignal()  # Request export of all results
+    export_filtered_requested = pyqtSignal(object)  # DataFrame (filtered results)
+    metrics_requested = pyqtSignal(str, object, str)  # SQL query, DataFrame, metrics_type ("original" or "filtered")
+    status_updated = pyqtSignal(str)  # Status message for main window
     
     def __init__(self, paginator: Optional[QueryPaginator] = None, 
                  config: Optional[PaginationConfig] = None, parent=None):
@@ -86,6 +90,11 @@ class PaginatedTableWidget(QWidget):
         self.current_data: Optional[pd.DataFrame] = None
         self.current_page_info: Optional[PageInfo] = None
         self.worker: Optional[PaginationWorker] = None
+        
+        # Filter state
+        self.original_paginator: Optional[QueryPaginator] = None
+        self.is_filtered = False
+        self.filter_sql_condition = ""
         
         # Memory monitoring
         self.memory_timer = QTimer()
@@ -136,24 +145,72 @@ class PaginatedTableWidget(QWidget):
         layout = QHBoxLayout(frame)
         
         # Search controls
-        search_group = QGroupBox("Search")
-        search_layout = QHBoxLayout(search_group)
+        search_group = QGroupBox("Search & Filter")
+        search_main_layout = QVBoxLayout(search_group)
+        
+        # First row: Column selection and search input
+        search_row1 = QHBoxLayout()
+        
+        # Column selector
+        column_label = QLabel("Column:")
+        column_label.setMinimumWidth(50)
+        search_row1.addWidget(column_label)
+        
+        self.column_dropdown = QComboBox()
+        self.column_dropdown.setMinimumWidth(140)
+        self.column_dropdown.setMaximumWidth(200)
+        self.column_dropdown.addItem("All Columns")
+        search_row1.addWidget(self.column_dropdown)
+        
+        search_row1.addSpacing(10)  # Add some space
+        
+        # Search input
+        search_label = QLabel("Search:")
+        search_label.setMinimumWidth(50)
+        search_row1.addWidget(search_label)
         
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search in selected column or all columns...")
-        self.search_input.textChanged.connect(self.filter_current_page)
-        search_layout.addWidget(self.search_input)
-
-        # Column selector dropdown
-        self.column_dropdown = QComboBox()
-        self.column_dropdown.setMinimumWidth(120)
-        self.column_dropdown.addItem("All Columns")
-        self.column_dropdown.currentTextChanged.connect(self.filter_current_page)
-        search_layout.addWidget(self.column_dropdown)
-
+        self.search_input.setPlaceholderText("Enter search term...")
+        self.search_input.setMinimumWidth(200)
+        self.search_input.returnPressed.connect(self.apply_dataset_filter)
+        search_row1.addWidget(self.search_input)
+        
+        search_row1.addStretch()  # Push everything to the left
+        search_main_layout.addLayout(search_row1)
+        
+        # Second row: Options and buttons
+        search_row2 = QHBoxLayout()
+        
+        # Case sensitivity checkbox
         self.case_sensitive_cb = QCheckBox("Case sensitive")
-        self.case_sensitive_cb.stateChanged.connect(self.filter_current_page)
-        search_layout.addWidget(self.case_sensitive_cb)
+        search_row2.addWidget(self.case_sensitive_cb)
+        
+        search_row2.addSpacing(15)  # Add space between checkbox and buttons
+        
+        # Apply filter button
+        self.apply_filter_btn = QPushButton("Apply Filter")
+        self.apply_filter_btn.setToolTip("Apply filter to entire dataset and re-paginate")
+        self.apply_filter_btn.clicked.connect(self.apply_dataset_filter)
+        self.apply_filter_btn.setMinimumWidth(90)
+        search_row2.addWidget(self.apply_filter_btn)
+        
+        # Clear filter button
+        self.clear_filter_btn = QPushButton("Clear Filter")
+        self.clear_filter_btn.setToolTip("Remove all filters and show complete dataset")
+        self.clear_filter_btn.clicked.connect(self.clear_dataset_filter)
+        self.clear_filter_btn.setEnabled(False)
+        self.clear_filter_btn.setMinimumWidth(90)
+        search_row2.addWidget(self.clear_filter_btn)
+        
+        search_row2.addSpacing(15)  # Add space before status
+        
+        # Filter status label
+        self.filter_status_label = QLabel("")
+        self.filter_status_label.setStyleSheet("QLabel { color: #666666; font-style: italic; }")
+        search_row2.addWidget(self.filter_status_label)
+        
+        search_row2.addStretch()  # Push everything to the left
+        search_main_layout.addLayout(search_row2)
         
         layout.addWidget(search_group)
         
@@ -176,11 +233,58 @@ class PaginatedTableWidget(QWidget):
         
         layout.addStretch()
         
-        # Export button
-        self.export_btn = QPushButton("Export Page")
-        self.export_btn.clicked.connect(self.export_current_page)
-        self.export_btn.setEnabled(False)
-        layout.addWidget(self.export_btn)
+        # Export & Analysis group
+        export_group = QGroupBox("Export & Analysis")
+        export_main_layout = QVBoxLayout(export_group)
+        
+        # First row: Export buttons
+        export_row1 = QHBoxLayout()
+        
+        self.export_page_btn = QPushButton("Export Page")
+        self.export_page_btn.clicked.connect(self.export_current_page)
+        self.export_page_btn.setEnabled(False)
+        self.export_page_btn.setMinimumWidth(110)
+        self.export_page_btn.setToolTip("Export only the current page of results")
+        export_row1.addWidget(self.export_page_btn)
+        
+        self.export_all_btn = QPushButton("Export All Results")
+        self.export_all_btn.clicked.connect(self.export_all_results)
+        self.export_all_btn.setEnabled(False)
+        self.export_all_btn.setMinimumWidth(130)
+        self.export_all_btn.setToolTip("Export the complete dataset (all pages)")
+        export_row1.addWidget(self.export_all_btn)
+        
+        self.export_filtered_btn = QPushButton("Export Filtered")
+        self.export_filtered_btn.clicked.connect(self.export_filtered_results)
+        self.export_filtered_btn.setEnabled(False)
+        self.export_filtered_btn.setMinimumWidth(120)
+        self.export_filtered_btn.setToolTip("Export only records matching the current search filter")
+        export_row1.addWidget(self.export_filtered_btn)
+        
+        export_row1.addStretch()  # Push buttons to the left
+        export_main_layout.addLayout(export_row1)
+        
+        # Second row: Metrics buttons
+        export_row2 = QHBoxLayout()
+        
+        self.show_original_metrics_btn = QPushButton("Query Metrics")
+        self.show_original_metrics_btn.clicked.connect(self.show_original_metrics)
+        self.show_original_metrics_btn.setEnabled(False)
+        self.show_original_metrics_btn.setMinimumWidth(120)
+        self.show_original_metrics_btn.setToolTip("Show detailed metrics for the entire original query result")
+        export_row2.addWidget(self.show_original_metrics_btn)
+        
+        self.show_filtered_metrics_btn = QPushButton("Filter Metrics")
+        self.show_filtered_metrics_btn.clicked.connect(self.show_filtered_metrics)
+        self.show_filtered_metrics_btn.setEnabled(False)
+        self.show_filtered_metrics_btn.setMinimumWidth(120)
+        self.show_filtered_metrics_btn.setToolTip("Show detailed metrics for the filtered dataset only")
+        export_row2.addWidget(self.show_filtered_metrics_btn)
+        
+        export_row2.addStretch()  # Push buttons to the left
+        export_main_layout.addLayout(export_row2)
+        
+        layout.addWidget(export_group)
         
         return frame
     
@@ -322,8 +426,14 @@ class PaginatedTableWidget(QWidget):
         # Hide progress
         self.progress_bar.setVisible(False)
         
-        # Enable export
-        self.export_btn.setEnabled(True)
+        # Enable export buttons
+        self.export_page_btn.setEnabled(True)
+        self.export_all_btn.setEnabled(True)
+        self.export_filtered_btn.setEnabled(bool(self.search_input.text().strip()))
+        
+        # Enable metrics buttons
+        self.show_original_metrics_btn.setEnabled(True)
+        self.show_filtered_metrics_btn.setEnabled(self.is_filtered)
         
         logger.info(f"Page {page_info.page_number + 1} loaded successfully")
     
@@ -409,59 +519,7 @@ class PaginatedTableWidget(QWidget):
         else:
             self.column_dropdown.setCurrentIndex(0)  # Default to "All Columns"
     
-    def filter_current_page(self):
-        """Filter the current page based on search text."""
-        if self.current_data is None or self.current_data.empty:
-            return
-        
-        search_text = self.search_input.text().strip()
-        
-        if not search_text:
-            # Show all rows
-            for row in range(self.table_widget.rowCount()):
-                self.table_widget.setRowHidden(row, False)
-            return
-        
-        # Apply filter
-        case_sensitive = self.case_sensitive_cb.isChecked()
-        selected_column = self.column_dropdown.currentText()
-        
-        if not case_sensitive:
-            search_text = search_text.lower()
-        
-        for row in range(self.table_widget.rowCount()):
-            row_matches = False
-            
-            if selected_column == "All Columns":
-                # Search all columns
-                for col in range(self.table_widget.columnCount()):
-                    item = self.table_widget.item(row, col)
-                    if item:
-                        cell_text = item.text()
-                        if not case_sensitive:
-                            cell_text = cell_text.lower()
-                        
-                        if search_text in cell_text:
-                            row_matches = True
-                            break
-            else:
-                # Search only selected column
-                try:
-                    col_index = list(self.current_data.columns).index(selected_column)
-                    if col_index < self.table_widget.columnCount():
-                        item = self.table_widget.item(row, col_index)
-                        if item:
-                            cell_text = item.text()
-                            if not case_sensitive:
-                                cell_text = cell_text.lower()
-                            
-                            if search_text in cell_text:
-                                row_matches = True
-                except (ValueError, IndexError):
-                    # Column not found, skip this row
-                    pass
-            
-            self.table_widget.setRowHidden(row, not row_matches)
+
     
     def update_navigation_state(self):
         """Update navigation button states."""
@@ -598,8 +656,8 @@ class PaginatedTableWidget(QWidget):
         if self.current_data is not None:
             self.export_requested.emit(self.current_data)
     
-    def export_all_data(self):
-        """Export all data (show warning for large datasets)."""
+    def export_all_results(self):
+        """Export all query results (all pages)."""
         if not self.paginator or not self.current_page_info:
             return
         
@@ -607,19 +665,74 @@ class PaginatedTableWidget(QWidget):
         if total_rows > 100000:  # Warn for large datasets
             reply = QMessageBox.question(
                 self,
-                "Large Dataset Export",
+                "Large Dataset Export", 
                 f"This will export {total_rows:,} rows which may take some time and use significant memory. Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
         
-        # TODO: Implement chunked export for very large datasets
-        QMessageBox.information(
+        # Signal to parent to handle the full export via database manager
+        self.export_all_requested.emit()
+    
+    def export_filtered_results(self):
+        """Export only the filtered results based on current search."""
+        if self.current_data is None or self.current_data.empty:
+            return
+        
+        search_text = self.search_input.text().strip()
+        if not search_text:
+            # No filter applied, export current page
+            QMessageBox.information(
+                self,
+                "No Filter Applied",
+                "No search filter is currently active. Use 'Export Page' to export current page data, or 'Export All Results' for the complete dataset."
+            )
+            return
+        
+        # Get filtered data from current page
+        filtered_data = self.get_filtered_data()
+        if filtered_data.empty:
+            QMessageBox.information(
+                self,
+                "No Matching Data",
+                f"No data matches the search filter '{search_text}'."
+            )
+            return
+        
+        # Show confirmation with exact count
+        selected_column = self.column_dropdown.currentText()
+        column_info = f" in '{selected_column}'" if selected_column != "All Columns" else " (all columns)"
+        
+        reply = QMessageBox.question(
             self,
-            "Export All Data",
-            "Full dataset export for large data is not yet implemented. Please use the main export functionality."
+            "Export Filtered Results",
+            f"Export {len(filtered_data):,} records matching '{search_text}'{column_info} from this page?\n\n"
+            f"Note: This exports only matches from the current page. For complete filtered results across all pages, "
+            f"consider refining your SQL query.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # Emit filtered page data. In future, could implement cross-page filtering
+            self.export_filtered_requested.emit(filtered_data)
+    
+    def get_filtered_data(self) -> pd.DataFrame:
+        """Get all filtered data from the entire dataset (not just current page)."""
+        if not self.is_filtered or not self.paginator:
+            # No filter applied, return current page data
+            return self.current_data.copy() if self.current_data is not None else pd.DataFrame()
+        
+        try:
+            # Execute the full filtered query to get all matching data
+            filtered_sql = self.paginator.sql
+            result = self.paginator.connection.execute(filtered_sql).df()
+            logger.info(f"Retrieved {len(result)} filtered rows for export")
+            return result
+        except Exception as e:
+            logger.error(f"Error getting filtered data: {e}")
+            # Fallback to current page data
+            return self.current_data.copy() if self.current_data is not None else pd.DataFrame()
     
     def clear_data(self):
         """Clear all data and reset the widget."""
@@ -635,8 +748,178 @@ class PaginatedTableWidget(QWidget):
         self.page_spinbox.setMaximum(1)
         
         self.set_navigation_enabled(False)
-        self.export_btn.setEnabled(False)
+        self.export_page_btn.setEnabled(False)
+        self.export_all_btn.setEnabled(False)
+        self.export_filtered_btn.setEnabled(False)
         
         if self.worker and self.worker.isRunning():
             self.worker.terminate()
             self.worker.wait(1000)
+    
+    def update_status_with_filter_info(self, total_rows: int, filtered_rows: int):
+        """Update the status bar with filter information."""
+        status = f"Showing {filtered_rows} of {total_rows} rows"
+        if filtered_rows != total_rows:
+            status += f" (filtered)"
+        
+        # Emit signal to main window to update status bar
+        self.status_updated.emit(status)
+    
+    def apply_dataset_filter(self):
+        """Apply filter to the entire dataset by modifying the SQL query."""
+        if not self.paginator:
+            return
+            
+        search_text = self.search_input.text().strip()
+        if not search_text:
+            return
+            
+        selected_column = self.column_dropdown.currentText()
+        case_sensitive = self.case_sensitive_cb.isChecked()
+        
+        try:
+            # Store original paginator if this is the first filter
+            if not self.is_filtered:
+                self.original_paginator = self.paginator
+            
+            # Build SQL WHERE condition
+            where_condition = self._build_sql_filter_condition(search_text, selected_column, case_sensitive)
+            
+            if where_condition:
+                # Create new filtered SQL
+                original_sql = self.original_paginator.sql
+                filtered_sql = f"SELECT * FROM ({original_sql}) AS filtered_data WHERE {where_condition}"
+                
+                # Create new paginator with filtered SQL
+                from ..data_pagination import QueryPaginator
+                filtered_paginator = QueryPaginator(
+                    self.original_paginator.connection, 
+                    filtered_sql, 
+                    self.config
+                )
+                
+                # Replace current paginator
+                self.paginator = filtered_paginator
+                self.is_filtered = True
+                self.filter_sql_condition = where_condition
+                
+                # Update UI state
+                self.clear_filter_btn.setEnabled(True)
+                self.export_filtered_btn.setEnabled(True)
+                self.show_filtered_metrics_btn.setEnabled(True)
+                self.filter_status_label.setText(f"Filter applied: {search_text}")
+                
+                # Reload first page with filtered data
+                self.current_page = 0
+                self.load_page(0)
+                
+                logger.info(f"Applied dataset filter: {where_condition}")
+                
+        except Exception as e:
+            logger.error(f"Error applying dataset filter: {e}")
+            self.filter_status_label.setText(f"Filter error: {str(e)}")
+    
+    def clear_dataset_filter(self):
+        """Clear the dataset filter and restore original data."""
+        if not self.is_filtered or not self.original_paginator:
+            return
+            
+        try:
+            # Restore original paginator
+            self.paginator = self.original_paginator
+            self.is_filtered = False
+            self.filter_sql_condition = ""
+            
+            # Update UI state
+            self.clear_filter_btn.setEnabled(False)
+            self.export_filtered_btn.setEnabled(False)
+            self.show_filtered_metrics_btn.setEnabled(False)
+            self.filter_status_label.setText("")
+            self.search_input.clear()
+            
+            # Reload first page with original data
+            self.current_page = 0
+            self.load_page(0)
+            
+            logger.info("Cleared dataset filter")
+            
+        except Exception as e:
+            logger.error(f"Error clearing dataset filter: {e}")
+            self.filter_status_label.setText(f"Clear filter error: {str(e)}")
+    
+    def _build_sql_filter_condition(self, search_text: str, selected_column: str, case_sensitive: bool) -> str:
+        """Build SQL WHERE condition for filtering."""
+        if not search_text:
+            return ""
+            
+        # Escape single quotes in search text
+        escaped_text = search_text.replace("'", "''")
+        
+        if selected_column == "All Columns":
+            # Search all columns - we'll need to get column names from sample data
+            sample_data = self.original_paginator.get_sample_data(1)
+            if sample_data.empty:
+                return ""
+                
+            conditions = []
+            for col in sample_data.columns:
+                col_condition = self._build_column_condition(col, escaped_text, case_sensitive)
+                if col_condition:
+                    conditions.append(col_condition)
+            
+            return " OR ".join(conditions) if conditions else ""
+        else:
+            # Search specific column
+            return self._build_column_condition(selected_column, escaped_text, case_sensitive)
+    
+    def _build_column_condition(self, column_name: str, escaped_text: str, case_sensitive: bool) -> str:
+        """Build SQL condition for a specific column."""
+        # Escape column name with double quotes to handle special characters/spaces
+        safe_column = f'"{column_name}"'
+        
+        if case_sensitive:
+            return f"CAST({safe_column} AS VARCHAR) LIKE '%{escaped_text}%'"
+        else:
+            return f"UPPER(CAST({safe_column} AS VARCHAR)) LIKE UPPER('%{escaped_text}%')"
+    
+    def show_original_metrics(self):
+        """Show metrics for the original (unfiltered) query result."""
+        if not self.original_paginator:
+            return
+        
+        try:
+            # Get the original SQL and execute it to get the full result for metrics
+            original_sql = self.original_paginator.sql
+            full_result = self.original_paginator.connection.execute(original_sql).df()
+            
+            # Emit signal to main window to show metrics
+            self.metrics_requested.emit(original_sql, full_result, "original")
+            
+        except Exception as e:
+            logger.error(f"Error getting original query metrics: {e}")
+            QMessageBox.warning(
+                self,
+                "Metrics Error",
+                f"Unable to generate original query metrics: {str(e)}"
+            )
+    
+    def show_filtered_metrics(self):
+        """Show metrics for the filtered dataset."""
+        if not self.is_filtered or not self.paginator:
+            return
+        
+        try:
+            # Get the filtered SQL and execute it to get the full filtered result
+            filtered_sql = self.paginator.sql
+            filtered_result = self.paginator.connection.execute(filtered_sql).df()
+            
+            # Emit signal to main window to show metrics
+            self.metrics_requested.emit(filtered_sql, filtered_result, "filtered")
+            
+        except Exception as e:
+            logger.error(f"Error getting filtered query metrics: {e}")
+            QMessageBox.warning(
+                self,
+                "Metrics Error",
+                f"Unable to generate filtered query metrics: {str(e)}"
+            )
