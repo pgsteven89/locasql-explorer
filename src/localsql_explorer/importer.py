@@ -121,6 +121,7 @@ class FileImporter:
                 'header': options.header_row,
                 'skiprows': options.skip_rows,
                 'nrows': options.max_rows,
+                'low_memory': False,  # Prevent dtype warnings for large files
             }
             
             # Handle type inference

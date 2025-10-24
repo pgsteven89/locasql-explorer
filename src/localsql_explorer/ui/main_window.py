@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QSplitter,
+    QStackedWidget,
     QStatusBar,
     QVBoxLayout,
     QWidget,
@@ -315,12 +316,15 @@ class MainWindow(QMainWindow):
         
         self.paginated_results = PaginatedTableWidget()
         self.paginated_results.export_requested.connect(self.export_results)
-        self.paginated_results.setVisible(False)  # Hidden initially
+        
+        # Create a stacked widget to manage results views
+        self.results_stack = QStackedWidget()
+        self.results_stack.addWidget(self.results_view)      # Index 0
+        self.results_stack.addWidget(self.paginated_results) # Index 1
         
         # Add to splitter
         self.splitter.addWidget(self.sql_editor)
-        self.splitter.addWidget(self.results_view)
-        self.splitter.addWidget(self.paginated_results)
+        self.splitter.addWidget(self.results_stack)
         
         # Set initial sizes (60% editor, 40% results)
         self.splitter.setSizes([600, 400])
@@ -934,15 +938,13 @@ class MainWindow(QMainWindow):
     def _switch_to_standard_view(self):
         """Switch to standard results view."""
         if self.current_results_mode != "standard":
-            self.results_view.setVisible(True)
-            self.paginated_results.setVisible(False)
+            self.results_stack.setCurrentIndex(0)  # Standard view is index 0
             self.current_results_mode = "standard"
     
     def _switch_to_paginated_view(self):
         """Switch to paginated results view."""
         if self.current_results_mode != "paginated":
-            self.results_view.setVisible(False)
-            self.paginated_results.setVisible(True)
+            self.results_stack.setCurrentIndex(1)  # Paginated view is index 1
             self.current_results_mode = "paginated"
     
     def _finalize_query_execution(self, sql: str, result, is_paginated: bool = False):

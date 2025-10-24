@@ -397,6 +397,8 @@ class FilePaginator(DataPaginator):
         read_kwargs = {**self.read_kwargs, **kwargs}
         
         if self.file_type == 'csv':
+            # Always set low_memory=False for CSV files to prevent dtype warnings
+            read_kwargs['low_memory'] = False
             return pd.read_csv(self.file_path, **read_kwargs)
         elif self.file_type == 'parquet':
             return pd.read_parquet(self.file_path, **read_kwargs)
@@ -410,7 +412,8 @@ class FilePaginator(DataPaginator):
         if self._sample_data is None:
             try:
                 if self.file_type == 'csv':
-                    self._sample_data = pd.read_csv(self.file_path, nrows=sample_size, **self.read_kwargs)
+                    sample_kwargs = {**self.read_kwargs, 'low_memory': False}
+                    self._sample_data = pd.read_csv(self.file_path, nrows=sample_size, **sample_kwargs)
                 else:
                     # For other formats, read all and sample
                     full_data = self._read_file()
@@ -457,11 +460,12 @@ class FilePaginator(DataPaginator):
             
             if self.file_type == 'csv':
                 # For CSV, we can use skiprows and nrows
+                csv_kwargs = {**self.read_kwargs, 'low_memory': False}
                 data = pd.read_csv(
                     self.file_path,
                     skiprows=range(1, skip_rows + 1) if skip_rows > 0 else None,
                     nrows=page_size,
-                    **self.read_kwargs
+                    **csv_kwargs
                 )
             else:
                 # For other formats, read all and slice (not ideal for very large files)
