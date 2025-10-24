@@ -1,0 +1,31 @@
+# LocalSQL Explorer Dependencies
+
+# Core dependencies
+duckdb>=0.9.0
+pandas>=2.0.0
+pyarrow>=10.0.0
+pydantic>=2.0.0
+sqlparse>=0.4.0
+
+# Excel support
+openpyxl>=3.1.0
+
+# UI framework
+PyQt6>=6.5.0
+
+# Optional CLI support
+typer>=0.9.0
+
+# Development dependencies (install with pip install -e .[dev])
+pytest>=7.0.0
+pytest-qt>=4.2.0
+pytest-cov>=4.0.0
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.0.0
+mypy>=1.5.0
+pre-commit>=3.0.0
+
+# Documentation
+sphinx>=7.0.0
+sphinx-rtd-theme>=1.3.0
