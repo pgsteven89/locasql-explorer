@@ -12,7 +12,7 @@ import logging
 from typing import Optional
 
 import pandas as pd
-from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QVariant, pyqtSignal
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QVariant, pyqtSignal, QEvent
 from PyQt6.QtWidgets import (
     QTableView,
     QWidget,
@@ -26,7 +26,8 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QComboBox,
     QCheckBox,
-    QGroupBox
+    QGroupBox,
+    QApplication
 )
 from PyQt6.QtGui import QAction
 
@@ -161,11 +162,14 @@ class ResultsTableView(QWidget):
         # Configure table view
         self.table_view.setSortingEnabled(True)
         self.table_view.setAlternatingRowColors(True)
-        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)  # Allow cell selection
         
         # Enable context menu
         self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table_view.customContextMenuRequested.connect(self.show_context_menu)
+        
+        # Install event filter for keyboard shortcuts
+        self.table_view.installEventFilter(self)
         
         # Header configuration
         horizontal_header = self.table_view.horizontalHeader()
@@ -330,25 +334,47 @@ class ResultsTableView(QWidget):
             return
             
         menu = QMenu(self)
+        selection_model = self.table_view.selectionModel()
+        selected_indexes = selection_model.selectedIndexes() if selection_model else []
+        
+        # Cell-level copy actions
+        if len(selected_indexes) == 1:
+            # Single cell selected
+            copy_cell_action = QAction("Copy Cell Value", self)
+            copy_cell_action.triggered.connect(self.copy_selected_cell)
+            menu.addAction(copy_cell_action)
+        elif len(selected_indexes) > 1:
+            # Multiple cells selected
+            copy_cells_action = QAction(f"Copy {len(selected_indexes)} Cells", self)
+            copy_cells_action.triggered.connect(self.copy_selected_cells)
+            menu.addAction(copy_cells_action)
+        
+        if selected_indexes:
+            menu.addSeparator()
+        
+        # Row-level copy action (if full rows are selected)
+        selected_rows = self.get_selected_rows()
+        if selected_rows:
+            copy_rows_action = QAction("Copy Selected Rows", self)
+            copy_rows_action.triggered.connect(self.copy_selected_rows)
+            menu.addAction(copy_rows_action)
+        
+        if selected_indexes or selected_rows:
+            menu.addSeparator()
         
         # Export action
         export_action = QAction("Export Results...", self)
         export_action.triggered.connect(self.export_results)
         menu.addAction(export_action)
         
-        # Copy selected action
-        copy_action = QAction("Copy Selected Rows", self)
-        copy_action.triggered.connect(self.copy_selected_rows)
-        copy_action.setEnabled(len(self.get_selected_rows()) > 0)
-        menu.addAction(copy_action)
-        
         menu.addSeparator()
         
-        # Row count info
+        # Selection info
         row_count = self.model.rowCount()
-        selected_count = len(self.get_selected_rows())
-        if selected_count > 0:
-            info_action = QAction(f"Selected: {selected_count} of {row_count} rows", self)
+        if len(selected_indexes) > 0:
+            info_action = QAction(f"Selected: {len(selected_indexes)} cells", self)
+        elif len(selected_rows) > 0:
+            info_action = QAction(f"Selected: {len(selected_rows)} of {row_count} rows", self)
         else:
             info_action = QAction(f"Total: {row_count} rows", self)
         info_action.setEnabled(False)
@@ -365,11 +391,90 @@ class ResultsTableView(QWidget):
             clipboard_text = selected_data.to_csv(sep='\t', index=False)
             
             # Copy to clipboard
-            from PyQt6.QtWidgets import QApplication
             clipboard = QApplication.clipboard()
             clipboard.setText(clipboard_text)
             
             logger.info(f"Copied {len(selected_data)} rows to clipboard")
+    
+    def copy_selected_cell(self):
+        """Copy the value of a single selected cell to clipboard."""
+        selection_model = self.table_view.selectionModel()
+        if not selection_model:
+            return
+        
+        selected_indexes = selection_model.selectedIndexes()
+        if len(selected_indexes) != 1:
+            return
+        
+        index = selected_indexes[0]
+        cell_data = self.model.data(index, Qt.ItemDataRole.DisplayRole)
+        cell_value = str(cell_data) if cell_data is not None else ""
+        
+        # Copy to clipboard
+        clipboard = QApplication.clipboard()
+        clipboard.setText(cell_value)
+        
+        logger.info(f"Copied cell value to clipboard: '{cell_value}'")
+    
+    def copy_selected_cells(self):
+        """Copy multiple selected cells to clipboard as tab-delimited text."""
+        selection_model = self.table_view.selectionModel()
+        if not selection_model:
+            return
+        
+        selected_indexes = selection_model.selectedIndexes()
+        if not selected_indexes:
+            return
+        
+        # Group by row to maintain table structure
+        rows_dict = {}
+        for index in selected_indexes:
+            row = index.row()
+            col = index.column()
+            if row not in rows_dict:
+                rows_dict[row] = {}
+            
+            cell_data = self.model.data(index, Qt.ItemDataRole.DisplayRole)
+            cell_value = str(cell_data) if cell_data is not None else ""
+            rows_dict[row][col] = cell_value
+        
+        # Build tab-delimited string
+        lines = []
+        for row in sorted(rows_dict.keys()):
+            row_data = rows_dict[row]
+            # Fill in empty cells with empty string for proper alignment
+            max_col = max(row_data.keys()) if row_data else 0
+            row_values = []
+            for col in range(max_col + 1):
+                row_values.append(row_data.get(col, ""))
+            lines.append("\t".join(row_values))
+        
+        clipboard_text = "\n".join(lines)
+        
+        # Copy to clipboard
+        clipboard = QApplication.clipboard()
+        clipboard.setText(clipboard_text)
+        
+        logger.info(f"Copied {len(selected_indexes)} cells to clipboard")
+    
+    def eventFilter(self, obj, event):
+        """Handle keyboard events for copy functionality."""
+        if obj == self.table_view and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                # Ctrl+C pressed
+                selection_model = self.table_view.selectionModel()
+                if selection_model:
+                    selected_indexes = selection_model.selectedIndexes()
+                    if len(selected_indexes) == 1:
+                        self.copy_selected_cell()
+                    elif len(selected_indexes) > 1:
+                        self.copy_selected_cells()
+                    else:
+                        # Fall back to row copy if no cells are selected
+                        self.copy_selected_rows()
+                return True
+        
+        return super().eventFilter(obj, event)
     
     def get_selected_rows(self) -> list[int]:
         """Get the indices of selected rows."""

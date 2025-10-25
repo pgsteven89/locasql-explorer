@@ -12,13 +12,13 @@ This module provides:
 import logging
 from typing import Optional, Callable, Dict, Any
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QEvent
 from PyQt6.QtGui import QFont, QAction
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QLabel, QPushButton, QSpinBox, QProgressBar, QGroupBox, QFrame,
     QComboBox, QLineEdit, QCheckBox, QMessageBox, QSplitter,
-    QHeaderView, QAbstractItemView, QMenu
+    QHeaderView, QAbstractItemView, QMenu, QApplication
 )
 
 import pandas as pd
@@ -120,12 +120,15 @@ class PaginatedTableWidget(QWidget):
         # Table widget
         self.table_widget = QTableWidget()
         self.table_widget.setAlternatingRowColors(True)
-        self.table_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)  # Allow cell selection
         self.table_widget.setSortingEnabled(True)
         
         # Context menu for table
         self.table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table_widget.customContextMenuRequested.connect(self.show_table_context_menu)
+        
+        # Install event filter for keyboard shortcuts
+        self.table_widget.installEventFilter(self)
         
         content_splitter.addWidget(self.table_widget)
         
@@ -608,18 +611,29 @@ class PaginatedTableWidget(QWidget):
             return
         
         menu = QMenu(self)
+        selected_items = self.table_widget.selectedItems()
         
-        # Copy cell action
-        copy_action = QAction("Copy Cell", self)
-        copy_action.triggered.connect(self.copy_selected_cell)
-        menu.addAction(copy_action)
+        # Cell-level copy actions
+        if len(selected_items) == 1:
+            # Single cell selected
+            copy_cell_action = QAction("Copy Cell Value", self)
+            copy_cell_action.triggered.connect(self.copy_selected_cell)
+            menu.addAction(copy_cell_action)
+        elif len(selected_items) > 1:
+            # Multiple cells selected
+            copy_cells_action = QAction(f"Copy {len(selected_items)} Cells", self)
+            copy_cells_action.triggered.connect(self.copy_selected_cells)
+            menu.addAction(copy_cells_action)
         
-        # Copy row action
-        copy_row_action = QAction("Copy Row", self)
-        copy_row_action.triggered.connect(self.copy_selected_row)
-        menu.addAction(copy_row_action)
+        # Row-level copy action
+        current_row = self.table_widget.currentRow()
+        if current_row >= 0:
+            copy_row_action = QAction("Copy Row", self)
+            copy_row_action.triggered.connect(self.copy_selected_row)
+            menu.addAction(copy_row_action)
         
-        menu.addSeparator()
+        if selected_items or current_row >= 0:
+            menu.addSeparator()
         
         # Export actions
         export_page_action = QAction("Export Current Page", self)
@@ -627,8 +641,19 @@ class PaginatedTableWidget(QWidget):
         menu.addAction(export_page_action)
         
         export_all_action = QAction("Export All Data...", self)
-        export_all_action.triggered.connect(self.export_all_data)
+        export_all_action.triggered.connect(self.export_all_results)
         menu.addAction(export_all_action)
+        
+        menu.addSeparator()
+        
+        # Selection info
+        if len(selected_items) > 0:
+            info_action = QAction(f"Selected: {len(selected_items)} cells", self)
+        else:
+            total_cells = self.table_widget.rowCount() * self.table_widget.columnCount()
+            info_action = QAction(f"Total: {total_cells} cells", self)
+        info_action.setEnabled(False)
+        menu.addAction(info_action)
         
         menu.exec(self.table_widget.mapToGlobal(position))
     
@@ -636,8 +661,39 @@ class PaginatedTableWidget(QWidget):
         """Copy selected cell to clipboard."""
         current_item = self.table_widget.currentItem()
         if current_item:
-            from PyQt6.QtWidgets import QApplication
-            QApplication.clipboard().setText(current_item.text())
+            cell_value = current_item.text()
+            QApplication.clipboard().setText(cell_value)
+            logger.info(f"Copied cell value to clipboard: '{cell_value}'")
+    
+    def copy_selected_cells(self):
+        """Copy multiple selected cells to clipboard as tab-delimited text."""
+        selected_items = self.table_widget.selectedItems()
+        if not selected_items:
+            return
+        
+        # Group by row to maintain table structure
+        rows_dict = {}
+        for item in selected_items:
+            row = item.row()
+            col = item.column()
+            if row not in rows_dict:
+                rows_dict[row] = {}
+            rows_dict[row][col] = item.text()
+        
+        # Build tab-delimited string
+        lines = []
+        for row in sorted(rows_dict.keys()):
+            row_data = rows_dict[row]
+            # Fill in empty cells for proper alignment
+            max_col = max(row_data.keys()) if row_data else 0
+            row_values = []
+            for col in range(max_col + 1):
+                row_values.append(row_data.get(col, ""))
+            lines.append("\t".join(row_values))
+        
+        clipboard_text = "\n".join(lines)
+        QApplication.clipboard().setText(clipboard_text)
+        logger.info(f"Copied {len(selected_items)} cells to clipboard")
     
     def copy_selected_row(self):
         """Copy selected row to clipboard."""
@@ -648,8 +704,26 @@ class PaginatedTableWidget(QWidget):
                 item = self.table_widget.item(current_row, col)
                 row_data.append(item.text() if item else "")
             
-            from PyQt6.QtWidgets import QApplication
-            QApplication.clipboard().setText("\t".join(row_data))
+            clipboard_text = "\t".join(row_data)
+            QApplication.clipboard().setText(clipboard_text)
+            logger.info(f"Copied row to clipboard")
+    
+    def eventFilter(self, obj, event):
+        """Handle keyboard events for copy functionality."""
+        if obj == self.table_widget and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                # Ctrl+C pressed
+                selected_items = self.table_widget.selectedItems()
+                if len(selected_items) == 1:
+                    self.copy_selected_cell()
+                elif len(selected_items) > 1:
+                    self.copy_selected_cells()
+                else:
+                    # Fall back to row copy
+                    self.copy_selected_row()
+                return True
+        
+        return super().eventFilter(obj, event)
     
     def export_current_page(self):
         """Export current page data."""

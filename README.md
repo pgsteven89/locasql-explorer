@@ -1,52 +1,274 @@
-# LocalSQL Explorer
+# 🧩 LocalSQL Explorer
 
-A local desktop application for exploring and querying CSV, XLSX, and Parquet files using SQL.
+A powerful local desktop application for exploring and querying CSV, XLSX, and Parquet files using SQL.
 
-## Overview
+## 📋 Overview
 
-LocalSQL Explorer allows you to:
-- Import datasets from CSV, Excel (XLSX), or Parquet files
-- Treat each file as a table within an embedded DuckDB database
-- Run SQL queries (including joins across multiple tables)
-- View results in an interactive table view
-- Export query results to various formats
-- Save or load a persistent DuckDB database for future use
+LocalSQL Explorer transforms your data files into a queryable SQL database, allowing you to:
 
-## Features
+- 📂 **Import Multiple Formats**: CSV, Excel (XLSX), and Parquet files
+- 🗃️ **SQL Database**: Each file becomes a table in an embedded DuckDB database  
+- 🔍 **Advanced Querying**: Run complex SQL queries including JOINs across multiple tables
+- 📊 **Interactive Results**: View, search, filter, and export query results
+- 💾 **Persistence**: Save your database for future sessions
+- 📤 **Export Options**: Multiple export formats with full/filtered data support
 
-- 📂 **File Import**: Support for CSV, XLSX, and Parquet files
-- 🗃️ **Table Management**: Each imported file becomes a DuckDB table
-- 📝 **SQL Editor**: Syntax-highlighted SQL editor with F5 execution
-- 📊 **Results Viewer**: Interactive table view with sorting and export
-- 💾 **Persistence**: Save and load databases (.duckdb files)
-- 🎨 **Modern UI**: PyQt6-based interface with dark/light themes
-- ⚡ **Performance**: DuckDB's vectorized engine for fast queries
+## ✨ Key Features
 
-## Quick Start
+### � **Performance & Scalability**
+- **DuckDB Engine**: Lightning-fast vectorized query processing
+- **Memory Efficient**: Paginated results for large datasets (1M+ rows)
+- **Smart Import**: Automatic data type detection and optimization
+- **Parallel Processing**: Multi-threaded operations for better performance
 
-### Installation
+### 💻 **User Interface** 
+- **Modern PyQt6 UI**: Clean, responsive interface with dark/light themes
+- **Syntax Highlighting**: SQL editor with intelligent highlighting
+- **Interactive Tables**: Sortable columns, cell-level selection, right-click menus
+- **Real-time Search**: Column-specific filtering with case sensitivity options
+- **Progress Indicators**: Visual feedback for long-running operations
+
+### 🔧 **Data Management**
+- **Drag & Drop Import**: Convenient file import with batch processing
+- **Table Management**: Rename, drop, refresh tables with schema information
+- **Query History**: Track and reuse previous queries
+- **Error Handling**: Clear, actionable error messages and validation
+
+### 📈 **Analysis Tools**
+- **Query Metrics**: Detailed performance and data statistics
+- **Filter Metrics**: Compare original vs filtered dataset characteristics
+- **Export Analytics**: Multiple export modes (page, all, filtered)
+- **Memory Monitoring**: Real-time memory usage tracking
+
+## 🛠️ Installation
+
+### Prerequisites
+
+- **Python 3.10+** (Python 3.11+ recommended)
+- **Operating System**: Windows, macOS, or Linux
+- **Memory**: 4GB RAM minimum (8GB+ recommended for large datasets)
+
+### Method 1: Quick Install (Recommended)
 
 ```bash
 # Clone the repository
-git clone https://github.com/username/localsql-explorer.git
+git clone https://github.com/pgsteven89/localsql-explorer.git
 cd localsql-explorer
 
-# Install dependencies
-pip install -e .
+# Create virtual environment (recommended)
+python -m venv .venv
 
-# Run the application
-localsql-explorer
+# Activate virtual environment
+# On Windows:
+.venv\Scripts\activate
+# On macOS/Linux:
+source .venv/bin/activate
+
+# Install all dependencies
+pip install -r requirements.txt
+
+# Install in development mode
+pip install -e .
 ```
 
-### Basic Usage
+### Method 2: Manual Dependencies
 
-1. **Import Data**: Click "Import" to load CSV, Excel, or Parquet files
-2. **Write SQL**: Use the SQL editor to write queries against your tables
-3. **Execute**: Press F5 or click "Run Query" to execute
-4. **View Results**: Results appear in the bottom panel
-5. **Export**: Right-click results to export to various formats
+If you prefer to install dependencies manually:
 
-### Example
+```bash
+pip install duckdb>=0.9.0
+pip install pandas>=2.0.0
+pip install PyQt6>=6.5.0
+pip install openpyxl>=3.1.0
+pip install pyarrow>=13.0.0
+pip install sqlparse>=0.4.0
+```
+
+### Method 3: Using pip (Future)
+
+```bash
+# Once published to PyPI
+pip install localsql-explorer
+```
+
+## 🚀 Running the Application
+
+### Command Line Methods
+
+```bash
+# Method 1: Using the installed command
+localsql-explorer
+
+# Method 2: Using Python module
+python -m localsql_explorer
+
+# Method 3: Direct execution
+python src/localsql_explorer/main.py
+```
+
+### IDE/Development Methods
+
+```python
+# Run from your IDE or Python script
+from localsql_explorer import main
+main.main()
+```
+
+### Executable (Future)
+
+Pre-built executables will be available for download on the releases page.
+
+## 📖 Usage Guide
+
+### Getting Started
+
+1. **Launch Application**: Use any of the methods above
+2. **Import Your Data**: 
+   - Click "Import" button or drag & drop files
+   - Select CSV, XLSX, or Parquet files
+   - Files become tables named after the filename
+3. **Explore Schema**: View tables and columns in the left sidebar
+4. **Write Queries**: Use the SQL editor with syntax highlighting
+5. **Execute**: Press `F5` or click "Run Query"
+6. **Analyze Results**: Use search, filtering, and export features
+
+### Example Workflow
+
+```sql
+-- After importing sales.csv and customers.xlsx
+SELECT 
+    c.customer_name,
+    s.product,
+    s.amount
+FROM sales s
+JOIN customers c ON s.customer_id = c.id
+WHERE s.amount > 1000
+ORDER BY s.amount DESC;
+```
+
+## 🎯 Key Features in Detail
+
+### Cell-Level Interaction
+- **Individual Cell Copy**: Right-click any cell → "Copy Cell Value"
+- **Multi-Cell Selection**: Select multiple cells → "Copy X Cells" 
+- **Keyboard Shortcuts**: `Ctrl+C` to copy selected cells
+- **Row Copy**: Copy entire rows as tab-delimited text
+- **Smart Formatting**: Handles nulls, dates, and special characters
+
+### Advanced Search & Filtering
+- **Column-Specific Search**: Target specific columns or search all
+- **Real-Time Filtering**: Instant results as you type
+- **Case Sensitivity**: Toggle for precise matching
+- **Dataset-Level Filters**: Filter entire result sets, not just visible pages
+- **Filter Metrics**: Compare original vs filtered statistics
+
+### Export Options
+- **Export Page**: Current visible page only
+- **Export All Results**: Complete query dataset
+- **Export Filtered**: Only rows matching current filters
+- **Multiple Formats**: CSV, Excel, Parquet support
+- **Large Dataset Handling**: Progress indicators and memory management
+
+## ⌨️ Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `F5` | Execute SQL query |
+| `Ctrl+N` | New database |
+| `Ctrl+O` | Open database |
+| `Ctrl+S` | Save database |
+| `Ctrl+I` | Import files |
+| `Ctrl+E` | Export results |
+| `Ctrl+M` | Show query metrics |
+| `Ctrl+C` | Copy selected cells |
+| `Ctrl+Z` | Undo in SQL editor |
+| `Ctrl+Y` | Redo in SQL editor |
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+**ImportError: No module named 'duckdb'**
+```bash
+pip install duckdb>=0.9.0
+```
+
+**PyQt6 import errors**
+```bash
+pip install PyQt6>=6.5.0
+```
+
+**Large file import fails**
+- Check available memory (close other applications)
+- Try importing files individually
+- Use CSV files for very large datasets (most efficient)
+
+**Query execution timeout**
+- Check query syntax for potential issues
+- Verify table names match imported files
+- Consider adding WHERE clauses to limit result size
+
+### Performance Tips
+
+- **Memory Management**: Close unused queries, use pagination for large results
+- **Query Optimization**: Use WHERE clauses early, avoid SELECT *
+- **File Formats**: Parquet files are fastest, CSV second, Excel slowest
+- **Indexing**: DuckDB automatically optimizes common query patterns
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our contributing guidelines:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes following our coding standards
+4. Add tests if applicable
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+### Development Setup
+
+```bash
+# Clone and setup development environment
+git clone https://github.com/pgsteven89/localsql-explorer.git
+cd localsql-explorer
+
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+python -m pytest
+
+# Run with development features
+python -m localsql_explorer --debug
+```
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🎯 Project Status
+
+**Current Version**: Phase 7 Implementation
+- ✅ Core SQL querying and data import
+- ✅ Interactive results with pagination  
+- ✅ Advanced search and filtering
+- ✅ Multiple export options
+- ✅ Cell-level copy functionality
+- ✅ Query and filter metrics
+- 🚧 Documentation updates
+- 📋 Enhanced UI/UX improvements
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/pgsteven89/localsql-explorer/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/pgsteven89/localsql-explorer/discussions)
+- **Email**: support@localsql-explorer.com
+
+---
+
+**Built with ❤️ using DuckDB, PyQt6, and Python**
 
 ```sql
 -- Import sales.csv and customers.xlsx first

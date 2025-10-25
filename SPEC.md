@@ -240,6 +240,37 @@ This project emphasizes **spec-driven development**, ensuring all features are c
   * Filter history and saved filter presets for common queries
   * Export filtered results while maintaining original query context
 
+### **Phase 7 – Cell-Level Interaction and Documentation**
+
+* [ ] **Individual Cell Copy Functionality** - Enable precise data extraction from result cells.
+  * Add cell-level selection support to both standard and paginated results views
+  * Right-click context menu on selected cells with "Copy Cell Value" option
+  * Keyboard shortcut (Ctrl+C) support for copying selected cell values to clipboard
+  * Handle different data types appropriately (text, numbers, dates, nulls)
+  * Visual feedback for selected cells with clear selection highlighting
+  * Support copying formatted values (e.g., dates in display format) vs raw values
+  * Multi-cell selection support for copying ranges to clipboard (tab-delimited)
+  * Null value handling with customizable representation in clipboard (empty, "NULL", etc.)
+
+* [ ] **Complete Documentation Updates** - Ensure comprehensive installation and usage documentation.
+  * Update README.md with complete installation instructions for all platforms
+  * Add step-by-step setup guide including Python environment requirements
+  * Document all methods to start the application (command line, IDE, executable)
+  * Include troubleshooting section for common installation and runtime issues  
+  * Add usage examples with screenshots showing key features and workflows
+  * Create developer setup guide for contributors with development environment setup
+  * Document all keyboard shortcuts and right-click context menu options
+  * Include performance recommendations for handling large datasets
+
+* [ ] **Enhanced Right-Click Context Menus** - Expand context menu functionality across the application.
+  * Standardize right-click menus across all table views (table list, results, paginated results)
+  * Add "Copy Row" option to copy entire selected rows as tab-delimited text
+  * "Copy Column" option to copy all visible values from a selected column
+  * "Copy Column Header" option for easy reference in query writing
+  * Export options directly from context menu (selected rows/columns to CSV)
+  * Quick filter options from cell values ("Filter by this value", "Exclude this value")
+  * Integration with system clipboard for seamless data transfer to other applications
+
 ---
 
 ## 8. Future Enhancements
