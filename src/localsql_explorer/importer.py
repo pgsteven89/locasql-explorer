@@ -50,6 +50,35 @@ class ImportResult(BaseModel):
     metadata: Dict = Field(default_factory=dict, description="Additional metadata")
 
 
+class SheetInfo(BaseModel):
+    """Information about an Excel worksheet."""
+    
+    model_config = {"arbitrary_types_allowed": True}
+    
+    name: str = Field(..., description="Sheet name")
+    index: int = Field(..., description="Sheet index (0-based)")
+    row_count: int = Field(..., description="Number of rows with data")
+    column_count: int = Field(..., description="Number of columns with data")
+    columns: List[str] = Field(default_factory=list, description="Column headers")
+    sample_data: Optional[pd.DataFrame] = Field(None, description="Sample rows for preview")
+    is_empty: bool = Field(False, description="Whether sheet appears to be empty")
+    has_merged_cells: bool = Field(False, description="Whether sheet contains merged cells")
+
+
+class BatchImportResult(BaseModel):
+    """Result of importing multiple sheets from an Excel file."""
+    
+    model_config = {"arbitrary_types_allowed": True}
+    
+    success: bool = Field(..., description="Whether overall import was successful")
+    file_path: str = Field(..., description="Source Excel file path")
+    total_sheets: int = Field(..., description="Total number of sheets processed")
+    successful_imports: List[ImportResult] = Field(default_factory=list, description="Successfully imported sheets")
+    failed_imports: List[Tuple[str, str]] = Field(default_factory=list, description="Failed sheet imports (name, error)")
+    warnings: List[str] = Field(default_factory=list, description="Overall import warnings")
+    table_names: List[str] = Field(default_factory=list, description="Names of created tables")
+
+
 class FileImporter:
     """
     Handles importing data from various file formats.
@@ -376,6 +405,214 @@ class FileImporter:
                 file_type='unknown',
                 error=error_msg
             )
+    
+    def detect_excel_sheets(self, file_path: Union[str, Path]) -> List[SheetInfo]:
+        """
+        Analyze an Excel file and return information about all worksheets.
+        
+        Args:
+            file_path: Path to Excel file
+            
+        Returns:
+            List of SheetInfo objects containing metadata about each sheet
+            
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            ValueError: If file is not a valid Excel file
+        """
+        file_path = Path(file_path)
+        
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
+        if file_path.suffix.lower() not in ['.xlsx', '.xls']:
+            raise ValueError(f"Not an Excel file: {file_path}")
+        
+        try:
+            # Read Excel file to get sheet information
+            excel_file = pd.ExcelFile(file_path)
+            sheet_infos = []
+            
+            for index, sheet_name in enumerate(excel_file.sheet_names):
+                try:
+                    # Read just the header and a few sample rows for analysis
+                    sample_df = pd.read_excel(
+                        excel_file, 
+                        sheet_name=sheet_name,
+                        nrows=10  # Read first 10 rows for preview
+                    )
+                    
+                    # Get full sheet dimensions (read without nrows limit to count)
+                    full_df = pd.read_excel(excel_file, sheet_name=sheet_name)
+                    actual_rows = len(full_df.dropna(how='all'))  # Exclude empty rows
+                    actual_cols = len(full_df.dropna(axis=1, how='all').columns)  # Exclude empty columns
+                    
+                    # Determine if sheet is effectively empty
+                    is_empty = actual_rows <= 1 or actual_cols == 0 or full_df.empty
+                    
+                    # Create sample data for preview (limit to first 5 rows)
+                    preview_df = sample_df.head(5) if not sample_df.empty else pd.DataFrame()
+                    
+                    # Get column headers
+                    columns = list(full_df.columns) if not full_df.empty else []
+                    
+                    sheet_info = SheetInfo(
+                        name=sheet_name,
+                        index=index,
+                        row_count=actual_rows,
+                        column_count=actual_cols,
+                        columns=columns,
+                        sample_data=preview_df if not preview_df.empty else None,
+                        is_empty=is_empty,
+                        has_merged_cells=False  # We could detect this with openpyxl if needed
+                    )
+                    
+                    sheet_infos.append(sheet_info)
+                    
+                except Exception as e:
+                    logger.warning(f"Could not analyze sheet '{sheet_name}': {e}")
+                    # Create a minimal SheetInfo for problematic sheets
+                    sheet_info = SheetInfo(
+                        name=sheet_name,
+                        index=index,
+                        row_count=0,
+                        column_count=0,
+                        columns=[],
+                        sample_data=None,
+                        is_empty=True,
+                        has_merged_cells=False
+                    )
+                    sheet_infos.append(sheet_info)
+            
+            excel_file.close()
+            return sheet_infos
+            
+        except Exception as e:
+            error_msg = f"Failed to analyze Excel file {file_path}: {str(e)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+    
+    def import_excel_multiple_sheets(
+        self,
+        file_path: Union[str, Path],
+        selected_sheets: List[Union[str, int]],
+        base_table_name: Optional[str] = None
+    ) -> BatchImportResult:
+        """
+        Import multiple sheets from an Excel file as separate tables.
+        
+        Args:
+            file_path: Path to Excel file
+            selected_sheets: List of sheet names or indices to import
+            base_table_name: Base name for tables (defaults to filename)
+            
+        Returns:
+            BatchImportResult containing information about all import operations
+        """
+        file_path = Path(file_path)
+        
+        if not base_table_name:
+            base_table_name = file_path.stem
+        
+        successful_imports = []
+        failed_imports = []
+        warnings = []
+        table_names = []
+        
+        total_sheets = len(selected_sheets)
+        
+        for sheet_identifier in selected_sheets:
+            try:
+                # Create import options for this specific sheet
+                options = ImportOptions(sheet_name=sheet_identifier)
+                
+                # Import the individual sheet
+                result = self.import_excel(file_path, options)
+                
+                if result.success:
+                    # Generate table name
+                    if isinstance(sheet_identifier, int):
+                        # Convert index to sheet name for table naming
+                        try:
+                            excel_file = pd.ExcelFile(file_path)
+                            sheet_name = excel_file.sheet_names[sheet_identifier]
+                            excel_file.close()
+                        except:
+                            sheet_name = f"sheet_{sheet_identifier}"
+                    else:
+                        sheet_name = str(sheet_identifier)
+                    
+                    # Sanitize sheet name for SQL table naming
+                    sanitized_sheet_name = self._sanitize_name(sheet_name)
+                    table_name = f"{self._sanitize_name(base_table_name)}_{sanitized_sheet_name}"
+                    
+                    # Update result with final table name
+                    result.metadata['table_name'] = table_name
+                    result.metadata['sheet_name'] = sheet_name
+                    result.metadata['base_file_name'] = base_table_name
+                    
+                    successful_imports.append(result)
+                    table_names.append(table_name)
+                    
+                    logger.info(f"Successfully imported sheet '{sheet_name}' as table '{table_name}'")
+                    
+                else:
+                    sheet_display_name = str(sheet_identifier)
+                    failed_imports.append((sheet_display_name, result.error or "Unknown error"))
+                    logger.error(f"Failed to import sheet '{sheet_display_name}': {result.error}")
+                    
+            except Exception as e:
+                sheet_display_name = str(sheet_identifier)
+                error_msg = str(e)
+                failed_imports.append((sheet_display_name, error_msg))
+                logger.error(f"Exception importing sheet '{sheet_display_name}': {error_msg}")
+        
+        # Determine overall success
+        overall_success = len(successful_imports) > 0
+        
+        # Generate warnings
+        if failed_imports:
+            warnings.append(f"{len(failed_imports)} out of {total_sheets} sheets failed to import")
+        
+        if len(successful_imports) < total_sheets:
+            warnings.append(f"Only {len(successful_imports)} out of {total_sheets} sheets imported successfully")
+        
+        # Create batch result
+        batch_result = BatchImportResult(
+            success=overall_success,
+            file_path=str(file_path),
+            total_sheets=total_sheets,
+            successful_imports=successful_imports,
+            failed_imports=failed_imports,
+            warnings=warnings,
+            table_names=table_names
+        )
+        
+        logger.info(f"Batch import completed: {len(successful_imports)}/{total_sheets} sheets successful")
+        
+        return batch_result
+    
+    def _sanitize_name(self, name: str) -> str:
+        """
+        Sanitize a name for use as a SQL table name.
+        
+        Args:
+            name: Raw name to sanitize
+            
+        Returns:
+            Sanitized name safe for SQL usage
+        """
+        import re
+        # Replace special characters with underscores
+        sanitized = re.sub(r'[^\w]', '_', name)
+        # Remove multiple consecutive underscores
+        sanitized = re.sub(r'_+', '_', sanitized)
+        # Remove leading/trailing underscores
+        sanitized = sanitized.strip('_')
+        # Ensure it's not empty
+        if not sanitized:
+            sanitized = 'unnamed'
+        return sanitized.lower()
     
     def get_suggested_table_name(self, file_path: Union[str, Path]) -> str:
         """

@@ -40,6 +40,7 @@ from .results_view import ResultsTableView
 from .paginated_results import PaginatedTableWidget
 from .enhanced_sql_editor import EnhancedSQLEditor
 from .table_list import TableListWidget
+from .excel_sheet_dialog import ExcelSheetSelectionDialog
 from .export_dialog import ExportOptionsDialog
 from .progress_dialog import DatabaseSaveDialog, DatabaseLoadDialog
 from .query_dialogs import QueryErrorDialog, QueryMetricsDialog
@@ -585,6 +586,143 @@ class MainWindow(QMainWindow):
         """Import files that were dropped onto the table list."""
         self.import_files(file_paths)
     
+    def import_excel_with_sheet_selection(self, file_path: str) -> bool:
+        """
+        Import Excel file with sheet selection dialog.
+        
+        Args:
+            file_path: Path to Excel file
+            
+        Returns:
+            True if import was successful, False if cancelled or failed
+        """
+        try:
+            # Analyze the Excel file to get sheet information
+            self.show_progress(f"Analyzing Excel file...", 10)
+            sheet_infos = self.file_importer.detect_excel_sheets(file_path)
+            
+            # If only one non-empty sheet, import directly without dialog
+            non_empty_sheets = [s for s in sheet_infos if not s.is_empty]
+            if len(non_empty_sheets) <= 1:
+                self.show_progress(f"Importing single sheet...", 50)
+                result = self.file_importer.import_file(file_path)
+                if result.success and result.dataframe is not None:
+                    return self._register_imported_table(file_path, result)
+                return False
+            
+            # Show sheet selection dialog
+            self.hide_progress()  # Hide progress during dialog
+            dialog = ExcelSheetSelectionDialog(file_path, sheet_infos, self)
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                selected_sheet_names = dialog.get_selected_sheet_names()
+                base_table_name = dialog.get_base_table_name()
+                
+                if not selected_sheet_names:
+                    return False
+                
+                # Show progress for batch import
+                self.show_progress(f"Importing {len(selected_sheet_names)} sheets...", 20)
+                
+                # Import selected sheets
+                batch_result = self.file_importer.import_excel_multiple_sheets(
+                    file_path, selected_sheet_names, base_table_name
+                )
+                
+                if batch_result.success:
+                    # Register each successfully imported sheet
+                    for import_result in batch_result.successful_imports:
+                        table_name = import_result.metadata.get('table_name')
+                        if table_name and self.db_manager:
+                            # Check for name conflicts
+                            original_name = table_name
+                            counter = 1
+                            while table_name in self.db_manager.tables:
+                                table_name = f"{original_name}_{counter}"
+                                counter += 1
+                            
+                            # Register with database
+                            metadata = self.db_manager.register_table(
+                                table_name,
+                                import_result.dataframe,
+                                file_path,
+                                import_result.file_type
+                            )
+                            
+                            # Add source sheet information to metadata
+                            metadata.metadata['source_sheet'] = import_result.metadata.get('sheet_name')
+                            metadata.metadata['source_file'] = Path(file_path).name
+                            
+                            # Update table list
+                            if self.table_list:
+                                self.table_list.add_table(metadata)
+                            
+                            logger.info(f"Successfully imported sheet '{import_result.metadata.get('sheet_name')}' as table '{table_name}'")
+                    
+                    # Show summary message
+                    total_imported = len(batch_result.successful_imports)
+                    total_failed = len(batch_result.failed_imports)
+                    
+                    if total_failed > 0:
+                        QMessageBox.information(
+                            self,
+                            "Import Complete",
+                            f"Excel import completed:\n• {total_imported} sheets imported successfully\n• {total_failed} sheets failed to import"
+                        )
+                    
+                    return True
+                else:
+                    QMessageBox.warning(
+                        self,
+                        "Import Failed", 
+                        f"Failed to import Excel sheets:\n{batch_result.warnings}"
+                    )
+                    return False
+            else:
+                # User cancelled
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to import Excel file {file_path}: {e}")
+            QMessageBox.critical(
+                self,
+                "Excel Import Error",
+                f"Failed to import Excel file:\n{str(e)}"
+            )
+            return False
+    
+    def _register_imported_table(self, file_path: str, result) -> bool:
+        """Helper method to register a single imported table."""
+        try:
+            # Generate table name and check for conflicts  
+            table_name = self.file_importer.get_suggested_table_name(file_path)
+            original_name = table_name
+            counter = 1
+            
+            while table_name in self.db_manager.tables:
+                table_name = f"{original_name}_{counter}"
+                counter += 1
+            
+            # Register with database
+            if self.db_manager:
+                metadata = self.db_manager.register_table(
+                    table_name,
+                    result.dataframe,
+                    file_path,
+                    result.file_type
+                )
+                
+                # Update table list
+                if self.table_list:
+                    self.table_list.add_table(metadata)
+                
+                logger.info(f"Successfully imported {Path(file_path).name} as table '{table_name}'")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Failed to register table for {file_path}: {e}")
+            return False
+    
     def import_files(self, file_paths: List[str]):
         """
         Import multiple files with progress tracking.
@@ -606,39 +744,25 @@ class MainWindow(QMainWindow):
                 progress = int((i / total_files) * 100)
                 self.show_progress(f"Importing {file_name} ({i+1}/{total_files})...", progress)
                 
-                # Import the file
-                result = self.file_importer.import_file(file_path)
-                
-                if result.success and result.dataframe is not None:
-                    # Generate table name and check for conflicts
-                    table_name = self.file_importer.get_suggested_table_name(file_path)
-                    original_name = table_name
-                    counter = 1
-                    
-                    # Handle duplicate table names
-                    while table_name in self.db_manager.tables:
-                        table_name = f"{original_name}_{counter}"
-                        counter += 1
-                    
-                    # Register with database
-                    if self.db_manager:
-                        metadata = self.db_manager.register_table(
-                            table_name,
-                            result.dataframe,
-                            file_path,
-                            result.file_type
-                        )
-                        
-                        # Update table list
-                        if self.table_list:
-                            self.table_list.add_table(metadata)
-                        
+                # Check if this is an Excel file for multi-sheet handling
+                if Path(file_path).suffix.lower() in ['.xlsx', '.xls']:
+                    success = self.import_excel_with_sheet_selection(file_path)
+                    if success:
                         successful_imports += 1
-                        logger.info(f"Successfully imported {file_name} as table '{table_name}'")
                     else:
-                        failed_imports.append((file_name, "Database not initialized"))
+                        failed_imports.append((file_name, "User cancelled or import failed"))
                 else:
-                    failed_imports.append((file_name, result.error or "Unknown error"))
+                    # Import non-Excel files normally
+                    result = self.file_importer.import_file(file_path)
+                    
+                    if result.success and result.dataframe is not None:
+                        success = self._register_imported_table(file_path, result)
+                        if success:
+                            successful_imports += 1
+                        else:
+                            failed_imports.append((file_name, "Database not initialized"))
+                    else:
+                        failed_imports.append((file_name, result.error or "Unknown error"))
                     
             except Exception as e:
                 failed_imports.append((file_name, str(e)))

@@ -209,3 +209,9 @@ diagnose_*.py  # Diagnostic scripts
 .duckdb
 sample_data/large_*
 test_data/large_*
+
+# Temporary test files (should not be committed)
+test_*.py        # Unless in proper test directories
+*_test.py        # Temporary test files in root
+temp_*.py        # Temporary scripts
+debug_*.py       # Debug scripts

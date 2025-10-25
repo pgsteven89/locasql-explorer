@@ -271,6 +271,46 @@ This project emphasizes **spec-driven development**, ensuring all features are c
   * Quick filter options from cell values ("Filter by this value", "Exclude this value")
   * Integration with system clipboard for seamless data transfer to other applications
 
+### **Phase 8 – Multi-Sheet Excel Import**
+
+* [ ] **Excel Sheet Detection and Analysis** - Provide comprehensive analysis of Excel workbook structure.
+  * Implement `detect_excel_sheets()` function in importer.py to analyze Excel files before import
+  * Return detailed sheet information including names, indices, row counts, column counts, and column headers
+  * Detect empty sheets and sheets with minimal data to help users make informed choices
+  * Sample first few rows of each sheet for preview functionality in selection dialog
+  * Handle Excel files with complex formatting, merged cells, and multiple data regions gracefully
+  * Support both .xlsx and legacy .xls formats with consistent sheet detection
+
+* [ ] **Interactive Sheet Selection Dialog** - Allow users to choose which sheets to import from Excel files.
+  * Create `ExcelSheetSelectionDialog` as a modal dialog that appears when importing Excel files
+  * Display scrollable list of all sheets with checkboxes for multiple selection
+  * Show sheet metadata: name, dimensions (rows x columns), and data preview for each sheet
+  * "Select All" and "Select None" buttons for convenient bulk selection
+  * Real-time preview of selected sheet data (first 5-10 rows) when sheet is highlighted
+  * Table naming preview showing how each sheet will be named (filename_sheetname format)
+  * Validation to ensure at least one sheet is selected before proceeding with import
+  * Cancel option to abort import process if user changes mind
+
+* [ ] **Batch Multi-Sheet Import Processing** - Import multiple sheets efficiently as separate tables.
+  * Extend ImportResult with `BatchImportResult` class for handling multiple sheet imports
+  * Implement `import_excel_multiple_sheets()` method that processes selected sheets in sequence
+  * Generate unique table names using format: `{filename}_{sheetname}` (sanitized for SQL)
+  * Handle naming conflicts when multiple Excel files have same sheet names
+  * Progress indicator showing current sheet being processed and overall completion
+  * Individual error handling per sheet - continue processing other sheets if one fails
+  * Consolidated import summary showing successful imports, warnings, and any errors
+  * Batch registration of all successfully imported sheets with DuckDB database
+
+* [ ] **Enhanced Excel Import User Experience** - Seamlessly integrate multi-sheet support into existing workflow.
+  * Modify main window import logic to detect Excel files and trigger sheet selection dialog
+  * Preserve existing single-sheet import behavior for backward compatibility (when only one sheet exists)
+  * Update table list UI to show all imported sheets grouped by source file
+  * Add source file information to table metadata for better organization and management
+  * Enhanced progress reporting during batch import with per-sheet status updates
+  * Import history tracking for multi-sheet imports with ability to re-import specific sheets
+  * Context menu options in table list to "Import Additional Sheets" from existing Excel files
+  * Tooltips and help text explaining multi-sheet import functionality to users
+
 ---
 
 ## 8. Future Enhancements
