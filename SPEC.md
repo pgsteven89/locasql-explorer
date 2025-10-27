@@ -311,6 +311,74 @@ This project emphasizes **spec-driven development**, ensuring all features are c
   * Context menu options in table list to "Import Additional Sheets" from existing Excel files
   * Tooltips and help text explaining multi-sheet import functionality to users
 
+### **Phase 9 – Multi-Tab SQL Editor & Query Execution Enhancements**
+
+* [ ] **Tabbed SQL Editor Interface** - Support multiple SQL editor tabs for working with different queries simultaneously.
+  * Implement tab widget in the main middle window to replace single SQL editor
+  * Allow users to create new editor tabs via "+" button or Ctrl+T keyboard shortcut
+  * Each tab maintains independent SQL query content and editor state
+  * Tab titles show descriptive names (e.g., "Query 1", "Query 2") with option to rename
+  * Close individual tabs with "X" button or Ctrl+W shortcut (always keep at least one tab open)
+  * Visual indicator for active/modified tabs (unsaved changes marked with asterisk)
+  * Tab reordering support via drag-and-drop for better organization
+  * Persist tab state between sessions (save all open tabs with their content)
+  * Context menu on tabs for operations: Rename, Close, Close Others, Close All to Right
+  * Tab switching via Ctrl+Tab (next) and Ctrl+Shift+Tab (previous) keyboard shortcuts
+
+* [ ] **Multi-Query Support in Single Editor** - Execute specific queries from editor containing multiple SQL statements.
+  * Support multiple SQL queries in a single editor tab separated by semicolons
+  * Implement intelligent query detection to identify individual statements based on cursor position
+  * "Run Query" button executes only the query where the cursor is currently positioned
+  * Visual highlighting or indication showing which query will be executed
+  * Parse and validate individual queries before execution to provide targeted error messages
+  * Support for complex multi-line queries with proper statement boundary detection
+  * Handle edge cases: queries with semicolons in strings, comments, or embedded SQL
+  * Display query context (line numbers, query number) in results view for clarity
+  * Cursor position preserved after query execution for quick iteration and testing
+
+* [ ] **Run All Queries Functionality** - Execute all queries in the current editor sequentially.
+  * Add "Run All Queries" button alongside existing "Run Query" button
+  * Parse editor content to identify all semicolon-separated SQL statements
+  * Execute queries sequentially in order of appearance within the editor
+  * Display results for each query separately with clear visual separation
+  * Show execution metrics per query (rows affected, execution time) in consolidated view
+  * Stop execution on first error with option to continue or abort remaining queries
+  * Progress indicator showing which query is currently executing (e.g., "Query 2 of 5")
+  * Aggregate statistics at end: total queries, successful, failed, total execution time
+  * Option to export all results as separate sheets in Excel or multiple CSV files
+
+* [ ] **Keyboard Shortcut Enhancements** - Add productivity shortcuts for query execution.
+  * Implement Ctrl+Enter as primary keyboard shortcut to run current query (cursor position)
+  * Maintain existing F5 shortcut for backward compatibility
+  * Add Ctrl+Shift+Enter to run all queries in current editor tab
+  * Add Ctrl+/ to toggle line comments (--) for current line or selected lines
+  * Display keyboard shortcuts in tooltips for Run Query and Run All Queries buttons
+  * Add keyboard shortcuts help dialog (Ctrl+/) showing all available shortcuts
+  * Configurable keyboard shortcuts in settings/preferences for power users
+  * Visual feedback when shortcut is pressed (brief button highlight or status message)
+  * Support for common editor shortcuts: Ctrl+A (select all), Ctrl+Z (undo), Ctrl+Y (redo)
+
+* [ ] **Comment Toggle Functionality** - Quick commenting/uncommenting of SQL code.
+  * Implement Ctrl+/ keyboard shortcut to toggle SQL line comments (--)
+  * Comment current line if no selection (adds "-- " at start of line)
+  * Comment all selected lines when multiple lines are selected
+  * Uncomment lines that are already commented (removes "-- " or "--")
+  * Preserve indentation when commenting/uncommenting
+  * Smart detection: if all selected non-empty lines are commented, uncomment them all
+  * Commented queries are excluded from execution by query parser
+  * Works seamlessly with multi-query support and tab management
+  * Undo/redo support for comment toggle operations
+
+* [ ] **Enhanced Query Results Management** - Improve handling of results from multiple queries and tabs.
+  * Results view shows which tab and query produced the current results
+  * Breadcrumb navigation showing: Tab Name → Query # → Results
+  * Option to keep results from previous executions in a results history panel
+  * Quick switch between result sets from different queries or tabs
+  * Clear results button with confirmation for multi-query result sets
+  * Export options aware of multi-query context (export current, export all from tab)
+  * Result caching for quick tab switching without re-executing queries
+  * Status bar shows active tab name and current query execution context
+
 ---
 
 ## 8. Future Enhancements

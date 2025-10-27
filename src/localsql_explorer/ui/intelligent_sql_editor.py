@@ -438,6 +438,11 @@ class IntelligentSQLEditor(QPlainTextEdit):
             self.query_requested.emit()
             return
         
+        # Handle Ctrl+/ for toggle comment
+        if key == Qt.Key.Key_Slash and modifiers == Qt.KeyboardModifier.ControlModifier:
+            self.toggle_comment()
+            return
+        
         # Handle Ctrl+Space for auto-completion
         if key == Qt.Key.Key_Space and modifiers == Qt.KeyboardModifier.ControlModifier:
             self.show_auto_completion()
@@ -801,6 +806,99 @@ class IntelligentSQLEditor(QPlainTextEdit):
         sql = self.get_sql()
         formatted = self.basic_sql_format(sql)
         self.set_sql(formatted)
+    
+    def toggle_comment(self):
+        """
+        Toggle SQL line comments (--) for the current line or selected lines.
+        
+        If lines are commented, uncomment them.
+        If lines are not commented, comment them.
+        Works with Ctrl+/ shortcut like VS Code.
+        """
+        cursor = self.textCursor()
+        
+        # Get selection boundaries
+        start_pos = cursor.selectionStart()
+        end_pos = cursor.selectionEnd()
+        has_selection = start_pos != end_pos
+        
+        # Get the document
+        doc = self.document()
+        
+        # Find start and end blocks
+        start_block = doc.findBlock(start_pos)
+        end_block = doc.findBlock(end_pos)
+        
+        # If no selection or end is at start of block, don't include that block
+        if end_pos == end_block.position() and end_block.blockNumber() > start_block.blockNumber():
+            end_block = end_block.previous()
+        
+        # Collect all blocks to process
+        blocks = []
+        current_block = start_block
+        while current_block.isValid() and current_block.blockNumber() <= end_block.blockNumber():
+            blocks.append(current_block)
+            current_block = current_block.next()
+        
+        if not blocks:
+            return
+        
+        # Determine if we should comment or uncomment
+        # Check if all non-empty lines are already commented
+        non_empty_blocks = [b for b in blocks if b.text().strip()]
+        if not non_empty_blocks:
+            return  # Nothing to do
+        
+        all_commented = all(b.text().lstrip().startswith('--') for b in non_empty_blocks)
+        
+        # Begin edit block for undo/redo
+        cursor.beginEditBlock()
+        
+        # Process each block
+        for block in blocks:
+            line_text = block.text()
+            
+            # Create a cursor for this block - select only the text, not the newline
+            block_cursor = QTextCursor(block)
+            block_cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            block_cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+            
+            if all_commented:
+                # Uncomment: remove "-- " or "--" from start
+                stripped = line_text.lstrip()
+                if stripped.startswith('-- '):
+                    # Remove "-- " (with space)
+                    leading_spaces = len(line_text) - len(stripped)
+                    new_line = line_text[:leading_spaces] + stripped[3:]
+                    block_cursor.insertText(new_line)
+                elif stripped.startswith('--'):
+                    # Remove "--" (without space)
+                    leading_spaces = len(line_text) - len(stripped)
+                    new_line = line_text[:leading_spaces] + stripped[2:]
+                    block_cursor.insertText(new_line)
+            else:
+                # Comment: add "-- " at the start (preserving indentation)
+                if line_text.strip():  # Only comment non-empty lines
+                    stripped = line_text.lstrip()
+                    leading_spaces = len(line_text) - len(stripped)
+                    new_line = line_text[:leading_spaces] + '-- ' + stripped
+                    block_cursor.insertText(new_line)
+        
+        cursor.endEditBlock()
+        
+        # Restore selection
+        # Recalculate positions since text length changed
+        new_start_block = doc.findBlockByNumber(start_block.blockNumber())
+        new_end_block = doc.findBlockByNumber(end_block.blockNumber())
+        
+        new_cursor = QTextCursor(doc)
+        new_cursor.setPosition(new_start_block.position())
+        
+        if has_selection:
+            # Select from start of first block to end of last block
+            new_cursor.setPosition(new_end_block.position() + new_end_block.length() - 1, QTextCursor.MoveMode.KeepAnchor)
+        
+        self.setTextCursor(new_cursor)
     
     def basic_sql_format(self, sql: str) -> str:
         """Basic SQL formatting."""

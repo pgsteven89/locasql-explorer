@@ -288,6 +288,10 @@ class EnhancedSQLEditor(QWidget):
         self.clear_button.setEnabled(not read_only)
         self.format_button.setEnabled(not read_only)
     
+    def toggle_comment(self):
+        """Toggle SQL line comments (--) for current line or selected lines."""
+        self.text_edit.toggle_comment()
+    
     def update_schema_info(self, tables: Dict[str, List[str]]):
         """Update table and column information for auto-completion."""
         self.text_edit.update_schema_info(tables)
