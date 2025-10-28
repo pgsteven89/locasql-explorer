@@ -23,6 +23,7 @@ from PyQt6.QtGui import QFont
 import pandas as pd
 
 from .styling import setup_text_selection_colors
+from ..themes import theme_manager, ThemeType
 
 logger = logging.getLogger(__name__)
 
@@ -46,20 +47,31 @@ class QueryErrorDialog(QDialog):
         """Initialize the user interface."""
         layout = QVBoxLayout(self)
         
+        # Detect current theme
+        is_dark = theme_manager.get_current_theme() == ThemeType.DARK
+        
         # Error summary
         summary_group = QGroupBox("Error Summary")
         summary_layout = QVBoxLayout(summary_group)
         
         self.error_label = QLabel("Query execution failed")
-        self.error_label.setStyleSheet("color: red; font-weight: bold; font-size: 14px;")
+        error_color = "#f44336" if is_dark else "#dc3545"
+        self.error_label.setStyleSheet(f"color: {error_color}; font-weight: bold; font-size: 14px;")
         summary_layout.addWidget(self.error_label)
         
-        # Error details
+        # Error details - theme-aware colors
         self.error_text = QTextEdit()
         self.error_text.setMaximumHeight(100)
         self.error_text.setReadOnly(True)
-        self.error_text.setStyleSheet("font-family: monospace; background-color: #ffe6e6;")
-        setup_text_selection_colors(self.error_text, False)  # Assume light theme for error dialog
+        
+        if is_dark:
+            # Dark theme: darker background with lighter error tint
+            self.error_text.setStyleSheet("font-family: monospace; background-color: #3d2020; color: #ffcdd2;")
+        else:
+            # Light theme: light error background
+            self.error_text.setStyleSheet("font-family: monospace; background-color: #ffe6e6; color: #000000;")
+        
+        setup_text_selection_colors(self.error_text, is_dark)
         summary_layout.addWidget(self.error_text)
         
         layout.addWidget(summary_group)
@@ -90,12 +102,22 @@ class QueryErrorDialog(QDialog):
         
         layout.addWidget(QLabel("SQL Query:"))
         
+        # Detect current theme
+        is_dark = theme_manager.get_current_theme() == ThemeType.DARK
+        
         self.query_text = QTextEdit()
         self.query_text.setReadOnly(True)
         self.query_text.setMaximumHeight(150)
-        self.query_text.setStyleSheet("font-family: monospace; background-color: #f5f5f5;")
+        
+        if is_dark:
+            # Dark theme: dark background with light text
+            self.query_text.setStyleSheet("font-family: monospace; background-color: #2d2d30; color: #e0e0e0;")
+        else:
+            # Light theme: light background
+            self.query_text.setStyleSheet("font-family: monospace; background-color: #f5f5f5; color: #000000;")
+        
         self.query_text.setPlainText(self.sql)
-        setup_text_selection_colors(self.query_text, False)  # Assume light theme
+        setup_text_selection_colors(self.query_text, is_dark)
         layout.addWidget(self.query_text)
         
         # Highlight problematic line if possible
@@ -110,9 +132,12 @@ class QueryErrorDialog(QDialog):
         
         layout.addWidget(QLabel("Suggestions to fix this error:"))
         
+        # Detect current theme
+        is_dark = theme_manager.get_current_theme() == ThemeType.DARK
+        
         self.suggestions_text = QTextEdit()
         self.suggestions_text.setReadOnly(True)
-        setup_text_selection_colors(self.suggestions_text, False)  # Assume light theme
+        setup_text_selection_colors(self.suggestions_text, is_dark)
         layout.addWidget(self.suggestions_text)
         
         self.tabs.addTab(suggestions_widget, "Suggestions")
@@ -122,9 +147,12 @@ class QueryErrorDialog(QDialog):
         help_widget = QWidget()
         layout = QVBoxLayout(help_widget)
         
+        # Detect current theme
+        is_dark = theme_manager.get_current_theme() == ThemeType.DARK
+        
         help_text = QTextEdit()
         help_text.setReadOnly(True)
-        setup_text_selection_colors(help_text, False)  # Assume light theme
+        setup_text_selection_colors(help_text, is_dark)
         help_text.setHtml("""
         <h3>Common SQL Error Types:</h3>
         <ul>

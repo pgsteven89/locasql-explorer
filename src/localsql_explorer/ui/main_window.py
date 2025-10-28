@@ -46,6 +46,7 @@ from .export_dialog import ExportOptionsDialog
 from .progress_dialog import DatabaseSaveDialog, DatabaseLoadDialog
 from .query_dialogs import QueryErrorDialog, QueryMetricsDialog
 from .query_history_panel import QueryHistoryPanel
+from .query_worker import QueryWorker, PaginatedQueryWorker, MultiQueryWorker
 from ..query_history import QueryHistory
 from ..themes import theme_manager, ThemeType
 
@@ -111,6 +112,11 @@ class MainWindow(QMainWindow):
         self.last_query_sql = ""
         self.last_query_result = None
         self.last_query_time = 0.0
+        
+        # Background query execution
+        self.query_worker: Optional[QueryWorker] = None
+        self.paginated_worker: Optional[PaginatedQueryWorker] = None
+        self.multi_query_worker: Optional[MultiQueryWorker] = None
         
         self.init_ui()
         self.init_database()
@@ -1069,16 +1075,31 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("No query to execute")
             return
         
-        self.show_progress("Executing query...", 20)
+        # Check if a query is already running
+        if self.query_worker and self.query_worker.isRunning():
+            reply = QMessageBox.question(
+                self,
+                "Query Running",
+                "A query is already running. Do you want to cancel it and run this query?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.query_worker.cancel()
+                self.query_worker.wait()
+            else:
+                return
+        
+        self.show_progress("Preparing query...", 10)
         
         try:
-            # First, check if this is a large result set that needs pagination
+            # Check if this is a large result set that needs pagination
             should_use_pagination = self._should_use_pagination(sql)
             
             if should_use_pagination:
-                self._execute_query_with_pagination(sql)
+                self._execute_query_with_pagination_bg(sql)
             else:
-                self._execute_query_standard(sql)
+                self._execute_query_standard_bg(sql)
                 
         except Exception as e:
             self.hide_progress()
@@ -1101,7 +1122,7 @@ class MainWindow(QMainWindow):
     
     def run_all_queries(self, queries: List[str], tab_index: int = 0):
         """
-        Execute all queries in the list sequentially.
+        Execute all queries in the list sequentially in background.
         
         Args:
             queries: List of SQL query strings to execute
@@ -1110,145 +1131,173 @@ class MainWindow(QMainWindow):
         if not self.db_manager or not queries:
             return
         
+        # Check if already running
+        if self.multi_query_worker and self.multi_query_worker.isRunning():
+            QMessageBox.warning(
+                self,
+                "Queries Running",
+                "Multiple queries are already being executed. Please wait for them to complete."
+            )
+            return
+        
         total_queries = len(queries)
-        logger.info(f"Executing {total_queries} queries from tab {tab_index}")
+        logger.info(f"Starting background execution of {total_queries} queries from tab {tab_index}")
         
         # Create progress dialog
         from PyQt6.QtWidgets import QProgressDialog
-        progress = QProgressDialog(
+        self.multi_query_progress = QProgressDialog(
             f"Executing queries...",
             "Cancel",
             0,
             total_queries,
             self
         )
-        progress.setWindowTitle("Running All Queries")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.show()
+        self.multi_query_progress.setWindowTitle("Running All Queries")
+        self.multi_query_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.multi_query_progress.setMinimumDuration(0)
         
-        results_summary = []
-        successful = 0
-        failed = 0
-        total_rows = 0
-        total_time = 0.0
+        # Connect cancel button
+        self.multi_query_progress.canceled.connect(self._cancel_multi_query)
         
-        for idx, query in enumerate(queries, 1):
-            # Check if cancelled
-            if progress.wasCanceled():
-                logger.info(f"Query execution cancelled at query {idx}/{total_queries}")
-                break
+        # Create worker
+        self.multi_query_worker = MultiQueryWorker(self.db_manager, queries, self)
+        
+        # Connect signals
+        self.multi_query_worker.progress_update.connect(self._on_multi_query_progress)
+        self.multi_query_worker.query_completed.connect(self._on_single_query_completed)
+        self.multi_query_worker.all_queries_finished.connect(self._on_all_queries_finished)
+        self.multi_query_worker.query_error.connect(self._on_single_query_error)
+        
+        # Start the worker
+        self.multi_query_worker.start()
+        self.multi_query_progress.show()
+    
+    def _cancel_multi_query(self):
+        """Cancel multi-query execution."""
+        if self.multi_query_worker:
+            self.multi_query_worker.cancel()
+    
+    def _on_multi_query_progress(self, message: str, current: int, total: int):
+        """Handle progress updates from multi-query worker."""
+        if hasattr(self, 'multi_query_progress') and self.multi_query_progress:
+            self.multi_query_progress.setLabelText(message)
+            self.multi_query_progress.setValue(current)
+    
+    def _on_single_query_completed(self, result: dict):
+        """Handle completion of a single query in multi-query execution."""
+        # Add to history
+        tables_used = self._extract_tables_from_sql(result['full_query'])
+        self.query_history.add_query(
+            sql=result['full_query'],
+            execution_time=result['time'],
+            row_count=result['rows'],
+            success=True,
+            tables_used=tables_used
+        )
+    
+    def _on_single_query_error(self, query_num: int, sql: str, error_msg: str):
+        """Handle error from a single query in multi-query execution."""
+        # Add to history
+        tables_used = self._extract_tables_from_sql(sql)
+        self.query_history.add_query(
+            sql=sql,
+            execution_time=0.0,
+            row_count=0,
+            success=False,
+            error_message=error_msg,
+            tables_used=tables_used
+        )
+    
+    def _on_all_queries_finished(self, summary: dict):
+        """Handle completion of all queries."""
+        try:
+            # Close progress dialog
+            if hasattr(self, 'multi_query_progress') and self.multi_query_progress:
+                self.multi_query_progress.close()
+                self.multi_query_progress = None
             
-            query = query.strip()
-            if not query:
-                continue
+            successful = summary['successful']
+            failed = summary['failed']
+            total_rows = summary['total_rows']
+            total_time = summary['total_time']
+            results = summary['results']
             
-            # Update progress
-            progress.setLabelText(f"Executing query {idx} of {total_queries}...")
-            progress.setValue(idx - 1)
-            QApplication.processEvents()
-            
-            try:
-                # Execute query
-                result = self.db_manager.execute_query(query)
-                
-                if result.success and result.data is not None:
-                    successful += 1
-                    row_count = result.row_count
-                    total_rows += row_count
-                    total_time += result.execution_time
-                    
-                    results_summary.append({
-                        'query_num': idx,
-                        'status': 'Success',
-                        'rows': row_count,
-                        'time': result.execution_time,
-                        'query': query[:100] + ('...' if len(query) > 100 else '')
-                    })
-                    
-                    # Add to history
-                    tables_used = self._extract_tables_from_sql(query)
-                    self.query_history.add_query(
-                        sql=query,
-                        execution_time=result.execution_time,
-                        row_count=row_count,
-                        success=True,
-                        tables_used=tables_used
-                    )
-                    
-                    # Display result of last query in results view
-                    if idx == total_queries:
-                        if self.results_view:
-                            self._switch_to_standard_view()
-                            self.results_view.set_dataframe(result.data)
-                    
-                else:
-                    failed += 1
-                    error_msg = result.error or "Unknown error"
-                    results_summary.append({
-                        'query_num': idx,
-                        'status': 'Failed',
-                        'error': error_msg,
-                        'query': query[:100] + ('...' if len(query) > 100 else '')
-                    })
-                    
-                    # Add to history
-                    tables_used = self._extract_tables_from_sql(query)
-                    self.query_history.add_query(
-                        sql=query,
-                        execution_time=0.0,
-                        row_count=0,
-                        success=False,
-                        error_message=error_msg,
-                        tables_used=tables_used
-                    )
-                    
-                    # Ask user if they want to continue
-                    reply = QMessageBox.question(
-                        self,
-                        "Query Failed",
-                        f"Query {idx} failed:\n\n{error_msg}\n\nContinue with remaining queries?",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.Yes
-                    )
-                    
-                    if reply == QMessageBox.StandardButton.No:
-                        logger.info(f"User chose to stop after failed query {idx}")
-                        break
-                
-            except Exception as e:
-                failed += 1
-                error_msg = str(e)
-                results_summary.append({
-                    'query_num': idx,
-                    'status': 'Error',
-                    'error': error_msg,
-                    'query': query[:100] + ('...' if len(query) > 100 else '')
-                })
-                logger.error(f"Exception executing query {idx}: {e}")
-                
-                # Ask user if they want to continue
-                reply = QMessageBox.question(
-                    self,
-                    "Query Error",
-                    f"Error executing query {idx}:\n\n{error_msg}\n\nContinue with remaining queries?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes
-                )
-                
-                if reply == QMessageBox.StandardButton.No:
+            # Display the last successful query's results
+            last_success = None
+            for result in reversed(results):
+                if result['success'] and result.get('data') is not None:
+                    last_success = result
                     break
+            
+            if last_success and self.results_view:
+                self._switch_to_standard_view()
+                self.results_view.set_dataframe(last_success['data'])
+            
+            # Show summary dialog
+            self._show_all_queries_summary_bg(results, successful, failed, total_rows, total_time)
+            
+            # Update status bar
+            status_msg = f"Executed {successful + failed} queries: {successful} successful, {failed} failed in {total_time:.3f}s"
+            self.status_bar.showMessage(status_msg)
+            self.update_status_indicators()
+            
+        except Exception as e:
+            logger.error(f"Error handling multi-query completion: {e}", exc_info=True)
+        finally:
+            # Clean up worker
+            if self.multi_query_worker:
+                self.multi_query_worker.deleteLater()
+                self.multi_query_worker = None
+    
+    def _show_all_queries_summary_bg(self, results: List[dict], successful: int, failed: int, total_rows: int, total_time: float):
+        """Show summary dialog for all queries execution (background version)."""
+        from PyQt6.QtWidgets import QDialog, QTextEdit, QDialogButtonBox
         
-        progress.setValue(total_queries)
-        progress.close()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("All Queries Execution Summary")
+        dialog.resize(700, 500)
         
-        # Show summary dialog
-        self._show_all_queries_summary(results_summary, successful, failed, total_rows, total_time)
+        layout = QVBoxLayout()
         
-        # Update status bar
-        status_msg = f"Executed {successful + failed} queries: {successful} successful, {failed} failed in {total_time:.3f}s"
-        self.status_bar.showMessage(status_msg)
-        self.update_status_indicators()
+        # Summary label
+        summary_text = (
+            f"<h3>Execution Summary</h3>"
+            f"<p><b>Total Queries:</b> {successful + failed}<br>"
+            f"<b>Successful:</b> {successful}<br>"
+            f"<b>Failed:</b> {failed}<br>"
+            f"<b>Total Rows:</b> {total_rows:,}<br>"
+            f"<b>Total Time:</b> {total_time:.3f}s</p>"
+        )
+        
+        summary_label = QLabel(summary_text)
+        layout.addWidget(summary_label)
+        
+        # Results details
+        details_text = QTextEdit()
+        details_text.setReadOnly(True)
+        
+        details_html = "<h4>Query Details:</h4>"
+        for result in results:
+            status_color = "green" if result['status'] == 'Success' else "red"
+            details_html += f"<p><b style='color:{status_color}'>Query {result['query_num']}: {result['status']}</b><br>"
+            
+            if result['status'] == 'Success':
+                details_html += f"Rows: {result['rows']:,} | Time: {result['time']:.3f}s<br>"
+            else:
+                details_html += f"Error: {result.get('error', 'Unknown error')}<br>"
+            
+            details_html += f"<code>{result['query']}</code></p>"
+        
+        details_text.setHtml(details_html)
+        layout.addWidget(details_text)
+        
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        button_box.accepted.connect(dialog.accept)
+        layout.addWidget(button_box)
+        
+        dialog.setLayout(layout)
+        dialog.exec()
     
     def _show_all_queries_summary(self, results: List[dict], successful: int, failed: int, total_rows: int, total_time: float):
         """Show summary dialog for all queries execution."""
@@ -1325,7 +1374,7 @@ class MainWindow(QMainWindow):
         return False
     
     def _execute_query_standard(self, sql: str):
-        """Execute query with standard results view."""
+        """Execute query with standard results view (DEPRECATED - use _execute_query_standard_bg)."""
         result = self.db_manager.execute_query(sql)
         
         if result.success and result.data is not None:
@@ -1343,8 +1392,64 @@ class MainWindow(QMainWindow):
         else:
             self._handle_query_error(sql, result.error or "Query failed")
     
+    def _execute_query_standard_bg(self, sql: str):
+        """Execute query with standard results view in background thread."""
+        # Create and configure worker
+        self.query_worker = QueryWorker(self.db_manager, sql, self)
+        
+        # Connect signals
+        self.query_worker.progress_update.connect(self._on_query_progress)
+        self.query_worker.query_finished.connect(self._on_query_finished)
+        self.query_worker.query_error.connect(self._on_query_error)
+        
+        # Start the worker
+        self.query_worker.start()
+        logger.info(f"Started background query execution: {sql[:100]}...")
+    
+    def _on_query_progress(self, message: str, percentage: int):
+        """Handle progress updates from query worker."""
+        self.show_progress(message, percentage)
+    
+    def _on_query_finished(self, result):
+        """Handle successful query completion."""
+        try:
+            sql = self.query_worker.sql if self.query_worker else ""
+            
+            self.show_progress("Processing results...", 80)
+            
+            if result.success and result.data is not None:
+                # Switch to standard view
+                self._switch_to_standard_view()
+                
+                # Display results
+                if self.results_view:
+                    self.results_view.set_dataframe(result.data)
+                
+                self._finalize_query_execution(sql, result)
+            else:
+                self._handle_query_error(sql, result.error or "Query failed")
+                
+        except Exception as e:
+            logger.error(f"Error processing query results: {e}", exc_info=True)
+            self.hide_progress()
+            QMessageBox.critical(self, "Error", f"Failed to process results: {str(e)}")
+        finally:
+            # Clean up worker
+            if self.query_worker:
+                self.query_worker.deleteLater()
+                self.query_worker = None
+    
+    def _on_query_error(self, sql: str, error_message: str):
+        """Handle query execution error."""
+        self._handle_query_error(sql, error_message)
+        
+        # Clean up worker
+        if self.query_worker:
+            self.query_worker.deleteLater()
+            self.query_worker = None
+    
     def _execute_query_with_pagination(self, sql: str):
-        """Execute query with paginated results view."""
+        """Execute query with paginated results view (DEPRECATED - use _execute_query_with_pagination_bg)."""
         try:
             self.show_progress("Setting up pagination...", 40)
             
@@ -1379,6 +1484,61 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             self._handle_query_error(sql, str(e))
+    
+    def _execute_query_with_pagination_bg(self, sql: str):
+        """Execute query with paginated results view in background thread."""
+        # Create and configure worker
+        self.paginated_worker = PaginatedQueryWorker(self.db_manager, sql, self)
+        
+        # Connect signals
+        self.paginated_worker.progress_update.connect(self._on_query_progress)
+        self.paginated_worker.paginator_ready.connect(self._on_paginator_ready)
+        self.paginated_worker.query_error.connect(self._on_query_error)
+        
+        # Start the worker
+        self.paginated_worker.start()
+        logger.info(f"Started background paginated query setup: {sql[:100]}...")
+    
+    def _on_paginator_ready(self, paginator):
+        """Handle paginator setup completion."""
+        try:
+            sql = self.paginated_worker.sql if self.paginated_worker else ""
+            
+            self.show_progress("Setting up paginated view...", 85)
+            
+            # Switch to paginated view
+            self._switch_to_paginated_view()
+            
+            # Set up paginated results
+            if self.paginated_results:
+                self.paginated_results.set_paginator(paginator)
+            
+            # Create a lightweight result for history tracking
+            total_rows = paginator.get_total_rows()
+            sample_data = paginator.get_sample_data()
+            
+            # Create fake result for tracking
+            import time
+            execution_time = time.time() - time.time()  # Will be updated properly
+            
+            fake_result = type('Result', (), {
+                'success': True,
+                'data': sample_data,
+                'execution_time': execution_time,
+                'row_count': total_rows
+            })()
+            
+            self._finalize_query_execution(sql, fake_result, is_paginated=True)
+            
+        except Exception as e:
+            logger.error(f"Error setting up paginated view: {e}", exc_info=True)
+            self.hide_progress()
+            QMessageBox.critical(self, "Error", f"Failed to set up paginated view: {str(e)}")
+        finally:
+            # Clean up worker
+            if self.paginated_worker:
+                self.paginated_worker.deleteLater()
+                self.paginated_worker = None
     
     def _switch_to_standard_view(self):
         """Switch to standard results view."""
