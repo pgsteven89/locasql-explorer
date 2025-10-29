@@ -504,6 +504,43 @@ class TabbedSQLEditor(QWidget):
         if isinstance(tab, SQLEditorTab):
             tab.editor.toggle_comment()
     
+    def insert_text(self, text: str):
+        """Insert text at cursor position in current tab."""
+        tab = self.tab_widget.currentWidget()
+        if isinstance(tab, SQLEditorTab):
+            tab.editor.insert_text(text)
+    
+    def set_query_result_info(self, info: str):
+        """Set query result info in current tab."""
+        tab = self.tab_widget.currentWidget()
+        if isinstance(tab, SQLEditorTab) and hasattr(tab.editor, 'set_query_result_info'):
+            tab.editor.set_query_result_info(info)
+    
+    def update_schema_info(self, tables: List[str]):
+        """Update schema info in all tabs."""
+        for i in range(self.tab_widget.count()):
+            tab = self.tab_widget.widget(i)
+            if isinstance(tab, SQLEditorTab) and hasattr(tab.editor, 'update_schema_info'):
+                tab.editor.update_schema_info(tables)
+    
+    def insert_cte_template(self):
+        """Insert CTE template in current tab."""
+        tab = self.tab_widget.currentWidget()
+        if isinstance(tab, SQLEditorTab) and hasattr(tab.editor, 'insert_cte_template'):
+            tab.editor.insert_cte_template()
+    
+    def insert_recursive_cte_template(self):
+        """Insert recursive CTE template in current tab."""
+        tab = self.tab_widget.currentWidget()
+        if isinstance(tab, SQLEditorTab) and hasattr(tab.editor, 'insert_recursive_cte_template'):
+            tab.editor.insert_recursive_cte_template()
+    
+    def format_sql(self):
+        """Format SQL in current tab."""
+        tab = self.tab_widget.currentWidget()
+        if isinstance(tab, SQLEditorTab) and hasattr(tab.editor, 'format_sql'):
+            tab.editor.format_sql()
+    
     def set_tables(self, tables: List[str]):
         """Set available tables for auto-completion in all tabs."""
         for i in range(self.tab_widget.count()):
