@@ -9,8 +9,11 @@ This module provides the ResultsTableView class which displays:
 """
 
 import logging
+import math
+from decimal import Decimal
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QVariant, pyqtSignal, QEvent
 from PyQt6.QtWidgets import (
@@ -39,7 +42,7 @@ class PandasTableModel(QAbstractTableModel):
     
     def __init__(self, dataframe: Optional[pd.DataFrame] = None):
         super().__init__()
-        self._dataframe = dataframe or pd.DataFrame()
+        self._dataframe = dataframe if dataframe is not None else pd.DataFrame()
     
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         """Return number of rows."""
@@ -60,10 +63,11 @@ class PandasTableModel(QAbstractTableModel):
             # Handle different data types
             if pd.isna(value):
                 return "NULL"
-            elif isinstance(value, float):
-                return f"{value:.6g}"  # Format floats nicely
-            else:
-                return str(value)
+            if isinstance(value, float):
+                return self._format_float(value)
+            if isinstance(value, Decimal):
+                return self._format_decimal(value)
+            return str(value)
         
         return QVariant()
     
@@ -82,6 +86,20 @@ class PandasTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._dataframe = dataframe
         self.endResetModel()
+
+    @staticmethod
+    def _format_float(value: float) -> str:
+        """Format floating point numbers without losing precision."""
+        if not math.isfinite(value):
+            return str(value)
+        formatted = np.format_float_positional(value, trim='-')
+        return formatted if formatted else "0"
+
+    @staticmethod
+    def _format_decimal(value: Decimal) -> str:
+        """Format Decimal values preserving their defined scale."""
+        text = format(value, 'f')
+        return text if text else "0"
     
     def get_dataframe(self) -> pd.DataFrame:
         """Get the current dataframe."""

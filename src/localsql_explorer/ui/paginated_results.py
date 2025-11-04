@@ -10,7 +10,11 @@ This module provides:
 """
 
 import logging
+import math
+from decimal import Decimal
 from typing import Optional, Callable, Dict, Any
+
+import numpy as np
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QEvent
 from PyQt6.QtGui import QFont, QAction
@@ -476,13 +480,11 @@ class PaginatedTableWidget(QWidget):
                     item = QTableWidgetItem(item_text)
                     item.setForeground(Qt.GlobalColor.gray)
                     item.setFont(QFont("", -1, QFont.Weight.Normal, True))  # Italic
-                elif isinstance(value, (int, float)):
-                    item_text = str(value)
-                    item = QTableWidgetItem(item_text)
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 else:
-                    item_text = str(value)
+                    item_text = self._format_value(value)
                     item = QTableWidgetItem(item_text)
+                    if isinstance(value, (int, float, Decimal)):
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 
                 # Make items read-only
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -498,6 +500,19 @@ class PaginatedTableWidget(QWidget):
             width = header.sectionSize(col)
             if width > 300:
                 header.resizeSection(col, 300)
+
+    @staticmethod
+    def _format_value(value: Any) -> str:
+        """Format cell values for display without losing precision."""
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                return str(value)
+            formatted = np.format_float_positional(value, trim='-')
+            return formatted if formatted else "0"
+        if isinstance(value, Decimal):
+            text = format(value, 'f')
+            return text if text else "0"
+        return str(value)
     
     def update_column_dropdown(self):
         """Update the column dropdown with current data columns."""
