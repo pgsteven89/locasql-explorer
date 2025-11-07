@@ -162,6 +162,57 @@ class FileImporter:
             logger.warning(f"Error detecting delimiter for {file_path}: {str(e)}, defaulting to comma")
             return ','
     
+    def validate_csv_structure(
+        self,
+        file_path: Union[str, Path],
+        delimiter: str,
+        sample_lines: int = 20
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Validate CSV file structure to check for consistent field counts.
+        
+        Args:
+            file_path: Path to CSV file
+            delimiter: Delimiter to use for validation
+            sample_lines: Number of lines to check
+            
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = [f.readline().strip() for _ in range(sample_lines) if f.readline()]
+            
+            if len(lines) < 2:
+                return True, None  # Not enough lines to validate
+            
+            # Count fields in header
+            header_fields = len(lines[0].split(delimiter))
+            
+            # Check consistency in data rows
+            inconsistent_lines = []
+            for i, line in enumerate(lines[1:], start=2):
+                if not line:
+                    continue
+                field_count = len(line.split(delimiter))
+                if field_count != header_fields:
+                    inconsistent_lines.append((i, field_count))
+            
+            if inconsistent_lines:
+                error_msg = f"Inconsistent field counts detected:\n"
+                error_msg += f"Header has {header_fields} fields\n"
+                for line_num, count in inconsistent_lines[:5]:  # Show first 5
+                    error_msg += f"Line {line_num} has {count} fields\n"
+                if len(inconsistent_lines) > 5:
+                    error_msg += f"... and {len(inconsistent_lines) - 5} more lines with issues"
+                return False, error_msg
+            
+            return True, None
+            
+        except Exception as e:
+            logger.warning(f"Error validating CSV structure: {str(e)}")
+            return True, None  # Don't block import on validation errors
+    
     def detect_file_type(self, file_path: Union[str, Path]) -> str:
         """
         Detect file type based on file extension.
@@ -212,6 +263,17 @@ class FileImporter:
                     warnings.append(f"Auto-detected delimiter: {repr(detected_delimiter)}")
                     options.delimiter = detected_delimiter
             
+            # Validate CSV structure before attempting import
+            is_valid, validation_error = self.validate_csv_structure(
+                file_path, 
+                options.delimiter, 
+                sample_lines=50
+            )
+            
+            if not is_valid:
+                logger.warning(f"CSV structure validation failed for {file_path}:\n{validation_error}")
+                warnings.append("CSV file has inconsistent field counts - attempting flexible import")
+            
             # Prepare pandas read_csv arguments
             read_args = {
                 'filepath_or_buffer': file_path,
@@ -221,6 +283,8 @@ class FileImporter:
                 'skiprows': options.skip_rows,
                 'nrows': options.max_rows,
                 'low_memory': False,  # Prevent dtype warnings for large files
+                'on_bad_lines': 'warn',  # Warn about bad lines instead of crashing
+                'engine': 'python',  # Python engine is more flexible with delimiters
             }
             
             # Handle type inference
@@ -230,7 +294,22 @@ class FileImporter:
                 read_args['dtype'] = str  # Read everything as strings
             
             # Read the CSV file
-            df = pd.read_csv(**read_args)
+            try:
+                df = pd.read_csv(**read_args)
+            except pd.errors.ParserError as e:
+                # If parsing fails, try with quotechar to handle embedded delimiters
+                logger.warning(f"Initial CSV parse failed, retrying with quoting: {str(e)}")
+                read_args['quotechar'] = '"'
+                read_args['quoting'] = 1  # QUOTE_ALL
+                try:
+                    df = pd.read_csv(**read_args)
+                    warnings.append("File contains inconsistent delimiters - imported with quoting")
+                except Exception as e2:
+                    # Last resort: try skipping bad lines
+                    logger.warning(f"Retrying with skip_bad_lines: {str(e2)}")
+                    read_args['on_bad_lines'] = 'skip'
+                    df = pd.read_csv(**read_args)
+                    warnings.append("Some rows were skipped due to inconsistent field counts")
             
             # Validate the result
             if df.empty:
