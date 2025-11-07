@@ -725,6 +725,13 @@ class MainWindow(QMainWindow):
                 if self.table_list:
                     self.table_list.add_table(metadata)
                 
+                # Show warnings if any (e.g., detected delimiter)
+                if result.warnings:
+                    warning_msg = "\n".join(result.warnings)
+                    logger.info(f"Import warnings for {Path(file_path).name}: {warning_msg}")
+                    # Show in status bar for non-intrusive notification
+                    self.status_bar.showMessage(f"Imported {Path(file_path).name} - {warning_msg}", 5000)
+                
                 logger.info(f"Successfully imported {Path(file_path).name} as table '{table_name}'")
                 return True
             return False

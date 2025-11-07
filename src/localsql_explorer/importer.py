@@ -8,6 +8,7 @@ This module provides the FileImporter class which handles:
 - Integration with DatabaseManager for table registration
 """
 
+import csv
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -101,6 +102,66 @@ class FileImporter:
         """Initialize the file importer."""
         self.import_history: List[ImportResult] = []
     
+    def detect_csv_delimiter(
+        self,
+        file_path: Union[str, Path],
+        sample_size: int = 8192
+    ) -> str:
+        """
+        Detect the delimiter used in a CSV file.
+        
+        Args:
+            file_path: Path to CSV file
+            sample_size: Number of bytes to read for detection (default: 8KB)
+            
+        Returns:
+            str: Detected delimiter (comma, tab, pipe, semicolon, or comma as fallback)
+        """
+        file_path = Path(file_path)
+        
+        try:
+            # Read a sample of the file
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                sample = f.read(sample_size)
+            
+            # Use csv.Sniffer to detect the delimiter
+            sniffer = csv.Sniffer()
+            
+            # Try to detect delimiter
+            try:
+                dialect = sniffer.sniff(sample, delimiters=',\t|;')
+                detected_delimiter = dialect.delimiter
+                logger.info(f"Detected delimiter for {file_path.name}: {repr(detected_delimiter)}")
+                return detected_delimiter
+            except csv.Error:
+                # If Sniffer fails, fall back to manual detection
+                logger.warning(f"CSV Sniffer failed for {file_path.name}, using manual detection")
+                
+                # Count occurrences of common delimiters
+                lines = sample.split('\n')[:10]  # Check first 10 lines
+                if not lines:
+                    return ','
+                
+                delimiter_counts = {
+                    ',': sum(line.count(',') for line in lines),
+                    '\t': sum(line.count('\t') for line in lines),
+                    '|': sum(line.count('|') for line in lines),
+                    ';': sum(line.count(';') for line in lines)
+                }
+                
+                # Return delimiter with highest count
+                detected = max(delimiter_counts, key=delimiter_counts.get)
+                if delimiter_counts[detected] > 0:
+                    logger.info(f"Manually detected delimiter for {file_path.name}: {repr(detected)}")
+                    return detected
+                else:
+                    logger.warning(f"No delimiter detected for {file_path.name}, defaulting to comma")
+                    return ','
+                    
+        except Exception as e:
+            logger.warning(f"Error detecting delimiter for {file_path}: {str(e)}, defaulting to comma")
+            return ','
+    
     def detect_file_type(self, file_path: Union[str, Path]) -> str:
         """
         Detect file type based on file extension.
@@ -128,7 +189,7 @@ class FileImporter:
         options: Optional[ImportOptions] = None
     ) -> ImportResult:
         """
-        Import data from a CSV file.
+        Import data from a CSV file with automatic delimiter detection.
         
         Args:
             file_path: Path to CSV file
@@ -142,6 +203,15 @@ class FileImporter:
         warnings = []
         
         try:
+            # Auto-detect delimiter if default comma is specified
+            # This assumes comma is the default and triggers auto-detection
+            detected_delimiter = None
+            if options.delimiter == ",":
+                detected_delimiter = self.detect_csv_delimiter(file_path)
+                if detected_delimiter != ",":
+                    warnings.append(f"Auto-detected delimiter: {repr(detected_delimiter)}")
+                    options.delimiter = detected_delimiter
+            
             # Prepare pandas read_csv arguments
             read_args = {
                 'filepath_or_buffer': file_path,
@@ -173,6 +243,7 @@ class FileImporter:
             
             metadata = {
                 'delimiter': options.delimiter,
+                'detected_delimiter': detected_delimiter,
                 'encoding': options.encoding,
                 'original_shape': df.shape,
                 'memory_usage': df.memory_usage(deep=True).sum()
