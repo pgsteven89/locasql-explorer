@@ -30,7 +30,8 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QCheckBox,
     QGroupBox,
-    QApplication
+    QApplication,
+    QMessageBox
 )
 from PyQt6.QtGui import QAction
 
@@ -137,7 +138,9 @@ class ResultsTableView(QWidget):
     """
     
     # Signals
-    export_requested = pyqtSignal()  # Emitted when export is requested
+    export_requested = pyqtSignal()  # Emitted when export is requested (current page/all data in standard view)
+    export_all_requested = pyqtSignal()  # Emitted when export all is requested
+    export_filtered_requested = pyqtSignal(object)  # Emitted when filtered export is requested (with DataFrame)
     
     def __init__(self):
         """Initialize the results table view."""
@@ -162,10 +165,22 @@ class ResultsTableView(QWidget):
         
         header_layout.addStretch()
         
-        self.export_button = QPushButton("Export...")
+        # Export buttons group
+        export_buttons_layout = QHBoxLayout()
+        
+        self.export_button = QPushButton("Export Results")
         self.export_button.setEnabled(False)
         self.export_button.clicked.connect(self.export_results)
-        header_layout.addWidget(self.export_button)
+        self.export_button.setToolTip("Export all results to a file")
+        export_buttons_layout.addWidget(self.export_button)
+        
+        self.export_filtered_button = QPushButton("Export Filtered")
+        self.export_filtered_button.setEnabled(False)
+        self.export_filtered_button.clicked.connect(self.export_filtered_results)
+        self.export_filtered_button.setToolTip("Export only filtered results matching the search")
+        export_buttons_layout.addWidget(self.export_filtered_button)
+        
+        header_layout.addLayout(export_buttons_layout)
         
         layout.addLayout(header_layout)
         
@@ -270,6 +285,8 @@ class ResultsTableView(QWidget):
         
         # Enable export button
         self.export_button.setEnabled(not dataframe.empty)
+        # Export filtered button disabled initially (will be enabled when filter is applied)
+        self.export_filtered_button.setEnabled(False)
         
         # Auto-resize columns to content (with limits)
         self.table_view.resizeColumnsToContents()
@@ -341,10 +358,33 @@ class ResultsTableView(QWidget):
         self.set_dataframe(pd.DataFrame())
     
     def export_results(self):
-        """Export results (placeholder - would be connected to parent)."""
+        """Export all results."""
         # Emit signal to parent window to handle export
         self.export_requested.emit()
         logger.info("Export results requested")
+    
+    def export_filtered_results(self):
+        """Export only the filtered results based on current search."""
+        if self.filtered_data is None or self.filtered_data.empty:
+            QMessageBox.information(
+                self,
+                "No Filter Applied",
+                "No search filter is currently active. Use 'Export Results' to export all data."
+            )
+            return
+        
+        # Show confirmation with count
+        reply = QMessageBox.question(
+            self,
+            "Export Filtered Results",
+            f"Export {len(self.filtered_data):,} filtered records?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # Emit signal with filtered data
+            self.export_filtered_requested.emit(self.filtered_data)
+            logger.info(f"Export filtered results requested: {len(self.filtered_data)} rows")
     
     def show_context_menu(self, position):
         """Show context menu at the given position."""
@@ -607,5 +647,8 @@ class ResultsTableView(QWidget):
         else:
             self.filter_status_label.setText("")
         
-        # Enable/disable export based on filtered data
+        # Enable/disable export filtered button based on whether a filter is active
+        has_active_filter = bool(search_text and filtered_rows < total_rows)
+        self.export_filtered_button.setEnabled(has_active_filter and filtered_rows > 0)
+
         self.export_button.setEnabled(not self.filtered_data.empty)

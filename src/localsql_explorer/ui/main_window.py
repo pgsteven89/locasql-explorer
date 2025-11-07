@@ -324,11 +324,12 @@ class MainWindow(QMainWindow):
         # Create results views (standard and paginated)
         self.results_view = ResultsTableView()
         self.results_view.export_requested.connect(self.export_results)
+        self.results_view.export_filtered_requested.connect(self.export_filtered_results_from_view)
         
         self.paginated_results = PaginatedTableWidget()
         self.paginated_results.export_requested.connect(self.export_results)
         self.paginated_results.export_all_requested.connect(self.export_all_results)
-        self.paginated_results.export_filtered_requested.connect(self.export_results)
+        self.paginated_results.export_filtered_requested.connect(self.export_filtered_results_from_view)
         self.paginated_results.status_updated.connect(self.update_status)
         self.paginated_results.metrics_requested.connect(self.show_paginated_metrics)
         
@@ -967,9 +968,12 @@ class MainWindow(QMainWindow):
             try:
                 if dataframe is not None:
                     # Use the enhanced exporter with custom options
+                    # Get the format type from the dialog
+                    format_type = dialog.get_file_format()
                     result = self.result_exporter.export_result(
                         dataframe, 
                         file_path, 
+                        format_type,
                         export_options
                     )
                     
@@ -993,6 +997,54 @@ class MainWindow(QMainWindow):
                 else:
                     self.status_bar.showMessage("No data to export")
                 
+            except Exception as e:
+                error_msg = f"Export failed: {str(e)}"
+                self.status_bar.showMessage(error_msg)
+                QMessageBox.critical(self, "Export Error", error_msg)
+    
+    def export_filtered_results_from_view(self, filtered_dataframe: pd.DataFrame):
+        """Export filtered results from view (called with filtered DataFrame)."""
+        if filtered_dataframe is None or filtered_dataframe.empty:
+            QMessageBox.information(self, "Export", "No filtered results to export")
+            return
+        
+        # Create enhanced export dialog
+        dialog = ExportOptionsDialog(self, "filtered_results")
+        
+        if dialog.exec() == ExportOptionsDialog.DialogCode.Accepted:
+            file_path = dialog.get_file_path()
+            export_options = dialog.get_export_options()
+            
+            self.status_bar.showMessage(f"Exporting filtered results to {file_path}...")
+            
+            try:
+                # Use the enhanced exporter with custom options
+                format_type = dialog.get_file_format()
+                result = self.result_exporter.export_result(
+                    filtered_dataframe, 
+                    file_path, 
+                    format_type,
+                    export_options
+                )
+                
+                if result.success:
+                    file_size_mb = result.file_size / (1024*1024) if result.file_size else 0
+                    self.status_bar.showMessage(
+                        f"Exported {result.row_count} filtered rows to {Path(file_path).name} "
+                        f"({file_size_mb:.1f} MB)"
+                    )
+                    
+                    # Show success message with details
+                    QMessageBox.information(
+                        self, 
+                        "Export Successful",
+                        f"Successfully exported {result.row_count} filtered rows to:\n{file_path}\n\n"
+                        f"File size: {file_size_mb:.1f} MB"
+                    )
+                else:
+                    self.status_bar.showMessage(f"Export failed: {result.error}")
+                    QMessageBox.critical(self, "Export Error", result.error or "Unknown error")
+                    
             except Exception as e:
                 error_msg = f"Export failed: {str(e)}"
                 self.status_bar.showMessage(error_msg)
