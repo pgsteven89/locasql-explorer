@@ -282,7 +282,6 @@ class FileImporter:
                 'header': options.header_row,
                 'skiprows': options.skip_rows,
                 'nrows': options.max_rows,
-                'low_memory': False,  # Prevent dtype warnings for large files
                 'on_bad_lines': 'warn',  # Warn about bad lines instead of crashing
                 'engine': 'python',  # Python engine is more flexible with delimiters
             }
