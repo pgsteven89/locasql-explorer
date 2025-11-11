@@ -12,10 +12,17 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 from .models import AppConfig, UserPreferences
 from .ui.main_window import MainWindow
+
+# Windows-specific: Set AppUserModelID for proper taskbar icon
+if sys.platform == 'win32':
+    import ctypes
+    myappid = 'localsql.explorer.app.1.0'  # Arbitrary string
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
 # Configure logging
 logging.basicConfig(
@@ -85,6 +92,16 @@ def gui_main(config: Optional[AppConfig] = None) -> int:
         app.setApplicationName("LocalSQL Explorer")
         app.setApplicationVersion(config.version)
         app.setApplicationDisplayName("LocalSQL Explorer")
+        
+        # Set application icon
+        icon_path = Path(__file__).parent.parent.parent / "assets" / "lsqlx.png"
+        if not icon_path.exists():
+            # Fallback to original icons
+            icon_path = Path(__file__).parent.parent.parent / "assets" / "app_icon.ico"
+            if not icon_path.exists():
+                icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.png"
+        if icon_path.exists():
+            app.setWindowIcon(QIcon(str(icon_path)))
         
         # Set application properties
         app.setOrganizationName("LocalSQL Explorer")

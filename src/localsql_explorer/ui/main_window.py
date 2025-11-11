@@ -128,7 +128,14 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(800, 600)
         
         # Set window icon if available
-        icon_path = Path(__file__).parent.parent.parent.parent / "assets" / "icon.png"
+        assets_dir = Path(__file__).parent.parent.parent.parent / "assets"
+        # Try lsqlx.png first, then fall back to other icons
+        icon_path = assets_dir / "lsqlx.png"
+        if not icon_path.exists():
+            icon_path = assets_dir / "app_icon.ico"
+        if not icon_path.exists():
+            icon_path = assets_dir / "icon.png"
+        
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         
