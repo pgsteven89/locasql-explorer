@@ -40,6 +40,12 @@ LocalSQL Explorer transforms your data files into a queryable SQL database, allo
 - **Export Analytics**: Multiple export modes (page, all, filtered)
 - **Memory Monitoring**: Real-time memory usage tracking
 
+### 🤖 **MCP Integration (NEW!)**
+- **AI Assistant Access**: Connect Claude Desktop and other MCP clients to your data
+- **Natural Language Queries**: Let AI help you explore and analyze data
+- **Local-First**: No cloud uploads - data stays on your machine
+- **Automated Analysis**: Use AI prompts for data quality checks and insights
+
 ## 🛠️ Installation
 
 ### Prerequisites
@@ -269,6 +275,58 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Built with ❤️ using DuckDB, PyQt6, and Python**
+
+## 🤖 MCP Integration
+
+LocalSQL Explorer now supports the Model Context Protocol (MCP), enabling AI assistants like Claude to interact with your local data files directly!
+
+### Quick Start
+
+1. **Install with MCP support**:
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
+
+2. **Configure Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "localsql-explorer": {
+      "command": "python",
+      "args": ["-m", "localsql_explorer.mcp_main", "--db-path", "C:\\path\\to\\database.duckdb"]
+    }
+  }
+}
+```
+
+3. **Restart Claude Desktop** and start querying your data with natural language!
+
+### What Can You Do?
+
+- **"What tables are in the database?"** - List all available tables
+- **"Show me the schema for the customers table"** - Get column information
+- **"Run this query: SELECT * FROM sales WHERE amount > 1000"** - Execute SQL
+- **"Import this file: C:\data\new_data.csv"** - Import files as tables
+- **"Analyze the sales table"** - Get AI-powered data analysis
+
+### Features
+
+- 📊 **Resources**: Access table lists, schemas, and sample data
+- 🛠️ **Tools**: Execute queries, import files, get table info
+- 💡 **Prompts**: Pre-built templates for data analysis tasks
+- 🔒 **Secure**: Data stays local, no cloud uploads
+- ⚡ **Fast**: Direct DuckDB access with configurable row limits
+
+### Learn More
+
+See the complete [MCP Integration Guide](docs/mcp_guide.md) for:
+- Detailed configuration options
+- Security considerations
+- Advanced workflows
+- Troubleshooting tips
+
+---
 
 ```sql
 -- Import sales.csv and customers.xlsx first

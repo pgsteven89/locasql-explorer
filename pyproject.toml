@@ -41,6 +41,7 @@ dependencies = [
     "PyQt6>=6.5.0",
     "typer>=0.9.0",
     "Pillow>=10.0.0",
+    "mcp>=0.9.0",
 ]
 
 [project.optional-dependencies]
@@ -68,6 +69,7 @@ Documentation = "https://localsql-explorer.readthedocs.io/"
 [project.scripts]
 localsql-explorer = "localsql_explorer.main:main"
 lsqlx = "localsql_explorer.main:main"
+localsql-mcp = "localsql_explorer.mcp_main:main"
 
 [project.gui-scripts]
 localsql-explorer-gui = "localsql_explorer.main:gui_main"
