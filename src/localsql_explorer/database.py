@@ -78,10 +78,39 @@ class DatabaseManager:
             else:
                 self.connection = duckdb.connect(":memory:")
                 logger.info("Connected to in-memory database")
+
+            # Register compatibility macros
+            self._register_compatibility_macros()
+
         except Exception as e:
             logger.error(f"Failed to connect to database: {e}")
             raise
     
+    def _register_compatibility_macros(self) -> None:
+        """Register compatibility macros for common SQL functions."""
+        try:
+            # to_date(x, format) -> CAST(strptime(x, format) AS DATE)
+            self.connection.execute(
+                "CREATE OR REPLACE MACRO to_date(x, format) AS CAST(strptime(x, format) AS DATE)"
+            )
+
+            # to_char(x, format) -> strftime(x, format)
+            self.connection.execute(
+                "CREATE OR REPLACE MACRO to_char(x, format) AS strftime(x, format)"
+            )
+
+            # nvl(x, val) -> coalesce(x, val)
+            self.connection.execute(
+                "CREATE OR REPLACE MACRO nvl(x, val) AS coalesce(x, val)"
+            )
+
+            # Note: isnull is a reserved keyword in DuckDB, so we cannot define it as a macro
+
+            logger.debug("Registered compatibility macros (to_date, to_char, nvl)")
+
+        except Exception as e:
+            logger.warning(f"Failed to register compatibility macros: {e}")
+
     def register_table(
         self,
         name: str,
